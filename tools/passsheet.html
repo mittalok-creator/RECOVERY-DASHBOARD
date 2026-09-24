@@ -1,0 +1,696 @@
+<title>PassSheet</title>
+<!-- Synced with the main app's own theme toggle (2026-09-08) -- this tool
+     is embedded via iframe on the same origin as the main app, so it can
+     read the exact localStorage key the main app's own theme toggle
+     writes (see setTheme() in js/app.js) directly, no postMessage needed.
+     Runs before the <style> block below so data-theme is set before the
+     tool's own dark-theme CSS variables ever need to apply -- no flash of
+     the wrong theme. The `storage` event fires here too whenever the main
+     app's toggle changes it, so switching theme while this tab is already
+     open updates live. -->
+<script>
+(function(){
+  function syncTheme(){
+    try{
+      var t = localStorage.getItem('upgb-theme');
+      if(t==='dark'||t==='light') document.documentElement.dataset.theme = t;
+      else delete document.documentElement.dataset.theme;
+    }catch(e){}
+  }
+  syncTheme();
+  window.addEventListener('storage', function(e){ if(e.key==='upgb-theme') syncTheme(); });
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- Self-hosted, not CDN-linked (2026-09-08, folded into the main app's
+     Tools section) -- matches this app's convention for every other
+     vendor library (xlsx, exceljs, html2canvas, jspdf, msal-browser):
+     a bank office network is exactly the kind of place likely to block
+     an arbitrary CDN domain, so this tool's core function (reading the
+     PDF, building the Excel file) shouldn't depend on one being reachable.
+     pdf.js is vendored fresh here (v3.11.174, matching what this tool was
+     built against); exceljs reuses the copy the main app already ships
+     for its own Excel exports, rather than a second copy of the same
+     library. Only the Google Fonts link above stays CDN-linked, since
+     every font-family rule below already falls back to a system font. -->
+<script src="../js/vendor/pdf.min.js"></script>
+<script src="../js/vendor/exceljs.min.js"></script>
+<style>
+  :root{
+    --bg:#F2F5F3;
+    --surface:#FFFFFF;
+    --surface-muted:#EAEFEC;
+    --ink:#16211C;
+    --ink-muted:#5C6D64;
+    --line:#D7DED9;
+    --accent:#0E6B57;
+    --accent-ink:#FFFFFF;
+    --accent-soft:#DCEEE8;
+    --debit:#A5432B;
+    --credit:#0E6B57;
+    --warn:#9A6A0A;
+    --warn-soft:#F3E7CE;
+    --shadow: 0 1px 2px rgba(20,40,32,.06), 0 6px 20px -8px rgba(20,40,32,.18);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0F1C17;
+      --surface:#15251F;
+      --surface-muted:#1B2C25;
+      --ink:#E7F1EC;
+      --ink-muted:#93AA9F;
+      --line:#28392F;
+      --accent:#52C09B;
+      --accent-ink:#08150F;
+      --accent-soft:#1E362C;
+      --debit:#E58B72;
+      --credit:#63C79E;
+      --warn:#E2B85B;
+      --warn-soft:#3A3020;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 26px -10px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0F1C17;
+    --surface:#15251F;
+    --surface-muted:#1B2C25;
+    --ink:#E7F1EC;
+    --ink-muted:#93AA9F;
+    --line:#28392F;
+    --accent:#52C09B;
+    --accent-ink:#08150F;
+    --accent-soft:#1E362C;
+    --debit:#E58B72;
+    --credit:#63C79E;
+    --warn:#E2B85B;
+    --warn-soft:#3A3020;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 26px -10px rgba(0,0,0,.5);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    font-size:14px;
+    line-height:1.5;
+  }
+  .num, .mono{ font-variant-numeric:tabular-nums; }
+
+  .wrap{ max-width:1180px; margin:0 auto; padding:0 22px 56px; }
+
+  .topbar{
+    position:sticky; top:0; z-index:20;
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    padding:16px 22px; margin-bottom:8px;
+    background:color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);
+  }
+  .brand{ display:flex; align-items:center; gap:12px; }
+  .brand-mark{ font-size:26px; line-height:1; }
+  .brand-name{ font-family:'Spectral', Georgia, serif; font-weight:700; font-size:21px; letter-spacing:.2px; }
+  .brand-tag{ font-size:12px; color:var(--ink-muted); margin-top:1px; }
+  .topbar-actions{ display:flex; align-items:center; gap:10px; }
+
+  .pill{
+    font-size:12px; color:var(--ink-muted);
+    padding:6px 10px; border:1px solid var(--line); border-radius:999px; background:var(--surface);
+    white-space:nowrap;
+  }
+  .btn{
+    font-family:'IBM Plex Sans',sans-serif; font-size:13.5px; font-weight:600;
+    padding:9px 16px; border-radius:8px; border:1px solid var(--line);
+    background:var(--surface); color:var(--ink); cursor:pointer;
+  }
+  .btn:hover{ border-color:var(--accent); }
+  .btn:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+  .btn-primary{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  .btn-primary:hover{ filter:brightness(1.06); }
+  .btn-primary:disabled{ opacity:.45; cursor:not-allowed; filter:none; }
+  .btn-ghost{ background:transparent; }
+
+  main{ max-width:1180px; margin:0 auto; padding:0 22px; }
+
+  .hero{
+    display:grid; grid-template-columns: 1fr 1.35fr; gap:18px;
+    margin:18px 0 30px;
+  }
+  @media (max-width:760px){ .hero{ grid-template-columns:1fr; } }
+
+  .dropzone{
+    background:var(--surface); border:1.5px dashed var(--line); border-radius:14px;
+    padding:30px 22px; text-align:center; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    transition:border-color .15s, background .15s; box-shadow:var(--shadow);
+    min-height:190px;
+  }
+  .dropzone.drag{ border-color:var(--accent); background:var(--accent-soft); }
+  .dropzone-icon{ font-size:30px; margin-bottom:8px; }
+  .dropzone-title{ font-weight:600; font-size:15px; }
+  .dropzone-sub{ color:var(--ink-muted); font-size:12.5px; margin-top:6px; max-width:32ch; }
+
+  .status-panel{
+    background:var(--surface); border:1px solid var(--line); border-radius:14px;
+    box-shadow:var(--shadow); padding:24px; display:flex; flex-direction:column;
+    justify-content:center; gap:20px;
+  }
+  .status-empty{ color:var(--ink-muted); font-size:13.5px; line-height:1.5; max-width:34ch; }
+  .status-stats{ display:flex; gap:32px; }
+  .status-stats[hidden]{ display:none; }
+  .status-stat{ display:flex; flex-direction:column; }
+  .status-num{
+    font-family:'Spectral', Georgia, serif; font-weight:700; font-size:34px;
+    color:var(--accent); line-height:1; font-variant-numeric:tabular-nums;
+  }
+  .status-lbl{
+    font-size:10.5px; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--ink-muted); margin-top:6px;
+  }
+  .status-actions{ display:flex; gap:10px; margin-top:auto; }
+  .status-actions .btn{ flex:1; }
+
+  .section-label{
+    font-size:11.5px; font-weight:600; letter-spacing:.07em; text-transform:uppercase;
+    color:var(--ink-muted); margin:0 0 12px;
+  }
+
+  .accounts{ display:flex; flex-direction:column; gap:16px; margin-bottom:36px; }
+
+  .acct-card{
+    background:var(--surface); border:1px solid var(--line); border-radius:14px;
+    box-shadow:var(--shadow); overflow:hidden;
+  }
+  .acct-head{
+    display:flex; align-items:flex-start; justify-content:space-between; gap:14px;
+    padding:16px 18px; border-bottom:1px solid var(--line);
+  }
+  .acct-name{ font-family:'Spectral',serif; font-weight:600; font-size:16.5px; }
+  .acct-meta{ font-size:12px; color:var(--ink-muted); margin-top:3px; }
+  .badge{
+    font-size:11.5px; font-weight:600; padding:5px 10px; border-radius:999px; white-space:nowrap;
+  }
+  .badge-ok{ background:var(--accent-soft); color:var(--credit); }
+  .badge-warn{ background:var(--warn-soft); color:var(--warn); }
+
+  .acct-stats{
+    display:grid; grid-template-columns:repeat(5,1fr); gap:0;
+    border-bottom:1px solid var(--line);
+  }
+  .acct-stats > div{
+    padding:12px 16px; border-right:1px solid var(--line);
+  }
+  .acct-stats > div:last-child{ border-right:none; }
+  @media (max-width:700px){ .acct-stats{ grid-template-columns:repeat(2,1fr);} .acct-stats>div:nth-child(2n){border-right:none;} }
+  .stat-label{ display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-muted); }
+  .stat-val{ display:block; font-variant-numeric:tabular-nums; font-size:14px; font-weight:600; margin-top:3px; }
+  .stat-val.debit{ color:var(--debit); }
+  .stat-val.credit{ color:var(--credit); }
+
+  .table-wrap{ max-height:420px; overflow:auto; }
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  thead th{
+    position:sticky; top:0; background:var(--surface-muted); text-align:left;
+    padding:8px 12px; font-size:10.5px; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--ink-muted); border-bottom:1px solid var(--line); white-space:nowrap;
+  }
+  tbody td{ padding:6px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  tbody tr:nth-child(even){ background:var(--surface-muted); }
+  td.num{ text-align:right; white-space:nowrap; }
+  td.debit{ color:var(--debit); }
+  td.credit{ color:var(--credit); }
+  th.num{ text-align:right; }
+
+  .empty-state{
+    text-align:center; color:var(--ink-muted); padding:30px; font-size:13px;
+  }
+
+  .site-foot{
+    text-align:center; padding:28px 22px 34px; margin-top:20px;
+    border-top:1px solid var(--line);
+    font-family:'Spectral', Georgia, serif; font-size:12.5px; letter-spacing:.02em;
+    color:var(--ink-muted);
+  }
+  .site-foot span{ color:var(--accent); font-weight:600; }
+</style>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">📒</span>
+    <div>
+      <div class="brand-name">PassSheet <small style="font-weight:500;opacity:.65">(HMSTRP)</small></div>
+      <div class="brand-tag">Passbook PDF → structured Excel ledger</div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload passbook PDF">
+      <input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden>
+      <div class="dropzone-icon">🧾</div>
+      <div class="dropzone-title">Drop passbook statements here</div>
+      <div class="dropzone-sub">or click to browse — PDF, one or more accounts at a time</div>
+    </div>
+    <div class="status-panel">
+      <div id="statusEmpty" class="status-empty">Drop a statement to get started — nothing's been parsed yet.</div>
+      <div id="statusStats" class="status-stats" hidden>
+        <div class="status-stat"><span class="status-num" id="statAccounts">0</span><span class="status-lbl">Accounts</span></div>
+        <div class="status-stat"><span class="status-num" id="statTxns">0</span><span class="status-lbl">Transactions</span></div>
+      </div>
+      <div class="status-actions">
+        <button class="btn btn-primary" id="downloadBtn" disabled>Download Excel (.xlsx)</button>
+        <button class="btn btn-ghost" id="clearBtn">Clear all</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-label" id="accountsLabel" style="display:none;">Parsed accounts</div>
+  <section class="accounts" id="accountsSection"></section>
+
+  <div id="logBody" hidden></div>
+
+</main>
+
+<footer class="site-foot">Designed &amp; developed by <span>Alok Mittal</span></footer>
+
+<script>
+(function(){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '../js/vendor/pdf.worker.min.js';
+
+  var state = { accounts: [] };
+
+  var logBody = document.getElementById('logBody');
+  var statusEmpty = document.getElementById('statusEmpty');
+  var statusStats = document.getElementById('statusStats');
+  var statAccounts = document.getElementById('statAccounts');
+  var statTxns = document.getElementById('statTxns');
+  var downloadBtn = document.getElementById('downloadBtn');
+  var clearBtn = document.getElementById('clearBtn');
+  var dropzone = document.getElementById('dropzone');
+  var fileInput = document.getElementById('fileInput');
+  var accountsSection = document.getElementById('accountsSection');
+  var accountsLabel = document.getElementById('accountsLabel');
+
+  function logEvent(msg, level){
+    var d = document.createElement('div');
+    if(level==='ok') d.className='ok';
+    if(level==='warn') d.className='warn';
+    d.textContent = msg;
+    logBody.appendChild(d);
+    logBody.scrollTop = logBody.scrollHeight;
+  }
+
+  function fmt(n){
+    return (n||0).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function parseAmt(s){ return parseFloat(String(s).replace(/,/g,'')) || 0; }
+  function parseDDMMYYYY(s){
+    if(!s) return null;
+    var m = s.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+    if(!m) return null;
+    return new Date(Date.UTC(+m[3], +m[2]-1, +m[1]));
+  }
+  function base64ToBytes(b64){
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  async function extractFullText(arrayBuffer){
+    var loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    var pdf = await loadingTask.promise;
+    var lines = [];
+    for (var p=1; p<=pdf.numPages; p++){
+      var page = await pdf.getPage(p);
+      var content = await page.getTextContent();
+      var rowGroups = [];
+      for (var i=0;i<content.items.length;i++){
+        var item = content.items[i];
+        var str = item.str;
+        if (!str || !str.trim()) continue;
+        var y = item.transform[5];
+        var x = item.transform[4];
+        var row = null;
+        for (var j=0;j<rowGroups.length;j++){
+          if (Math.abs(rowGroups[j].y - y) <= 2){ row = rowGroups[j]; break; }
+        }
+        if (!row){ row = { y:y, items:[] }; rowGroups.push(row); }
+        row.items.push({ x:x, str:str });
+      }
+      rowGroups.sort(function(a,b){ return b.y - a.y; });
+      for (var k=0;k<rowGroups.length;k++){
+        var r = rowGroups[k];
+        r.items.sort(function(a,b){ return a.x - b.x; });
+        var text = r.items.map(function(it){ return it.str; }).join(' ').replace(/[ \t]+/g,' ').trim();
+        if (text) lines.push(text);
+      }
+    }
+    return lines.join('\n');
+  }
+
+  function parseAccountText(fullText, fileName){
+    var bankMatch = fullText.match(/^\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2}\s+(.+?)\s+Page\s+\d+/m);
+    var acctMatch = fullText.match(/Account Number\s*:\s*(\S+?)\/([A-Za-z]{2,5})\s+([^\n]+)/);
+    var periodMatch = fullText.match(/Report for the Period\s*:\s*(\d{2}-\d{2}-\d{4})\s*TO\s*(\d{2}-\d{2}-\d{4})/i);
+    var openMatch = fullText.match(/Account Opening balance\s*:\s*([\d,]+\.\d{2})\s*(CR|DR)/i);
+    var totalMatch = fullText.match(/Total\(Curr\.?\s*INR\)\s*:\s*([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*(CR|DR)/i);
+
+    if (!acctMatch) return null;
+
+    var accountNumber = acctMatch[1];
+    var accountName = acctMatch[3].trim();
+    var bankLine = bankMatch ? bankMatch[1].trim() : '';
+    var periodFrom = periodMatch ? periodMatch[1] : '';
+    var periodTo = periodMatch ? periodMatch[2] : '';
+    var openingBalance = openMatch ? parseAmt(openMatch[1]) : 0;
+    var openingCRDR = openMatch ? openMatch[2].toUpperCase() : 'CR';
+
+    var txRe = /^(\d{2}-\d{2}-\d{4})\s*([A-Za-z]?\d+)\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*(CR|DR)\s*$/gm;
+    var seen = {};
+    var rawRows = [];
+    var m;
+    while ((m = txRe.exec(fullText))) {
+      var date=m[1], tranId=m[2], particularsRaw=m[3], amtStr=m[4], balStr=m[5], crdr=m[6];
+      var key = date+'|'+tranId+'|'+particularsRaw+'|'+amtStr+'|'+balStr+'|'+crdr;
+      if (seen[key]) continue;
+      seen[key] = true;
+      var particulars = particularsRaw.trim();
+      var refNo = '';
+      var refM = particulars.match(/^(\d{6,})\s+(.*)$/);
+      if (refM){ refNo = refM[1]; particulars = refM[2]; }
+      rawRows.push({ date:date, tranId:tranId, refNo:refNo, particulars:particulars, amt:parseAmt(amtStr), balance:parseAmt(balStr), crdr:crdr.toUpperCase() });
+    }
+
+    var prevSigned = openingCRDR==='DR' ? -openingBalance : openingBalance;
+    var totalDebit=0, totalCredit=0;
+    var rows = rawRows.map(function(r, i){
+      var curSigned = r.crdr==='DR' ? -r.balance : r.balance;
+      var diff = curSigned - prevSigned;
+      var debit=0, credit=0;
+      if (diff >= -0.001) credit = Math.abs(diff); else debit = Math.abs(diff);
+      prevSigned = curSigned;
+      totalDebit += debit; totalCredit += credit;
+      return { sno:i+1, date:r.date, refNo:r.refNo, particulars:r.particulars, debit:debit, credit:credit, balance:r.balance, crdr:r.crdr };
+    });
+
+    var closingBalance = rows.length ? rows[rows.length-1].balance : openingBalance;
+    var closingCRDR = rows.length ? rows[rows.length-1].crdr : openingCRDR;
+
+    var printedDebit = totalMatch ? parseAmt(totalMatch[1]) : null;
+    var printedCredit = totalMatch ? parseAmt(totalMatch[2]) : null;
+    var printedBalance = totalMatch ? parseAmt(totalMatch[3]) : null;
+    var printedCRDR = totalMatch ? totalMatch[4].toUpperCase() : null;
+
+    // This bank's printed Total/Brought-Forward row folds the opening
+    // balance into whichever column carries its sign (a CR opening is
+    // posted as part of the Credit column, a DR opening as part of Debit)
+    // — a traditional ledger convention, not a period-only total.
+    var adjustedDebit = totalDebit + (openingCRDR === 'DR' ? openingBalance : 0);
+    var adjustedCredit = totalCredit + (openingCRDR === 'CR' ? openingBalance : 0);
+    var reconciled = printedDebit !== null &&
+      Math.abs(printedDebit - adjustedDebit) < 1 &&
+      Math.abs(printedCredit - adjustedCredit) < 1 &&
+      Math.abs(printedBalance - closingBalance) < 1 &&
+      printedCRDR === closingCRDR;
+
+    return {
+      fileName:fileName, bankLine:bankLine, accountNumber:accountNumber, accountName:accountName,
+      periodFrom:periodFrom, periodTo:periodTo, openingBalance:openingBalance, openingCRDR:openingCRDR,
+      rows:rows, totalDebit:totalDebit, totalCredit:totalCredit, closingBalance:closingBalance, closingCRDR:closingCRDR,
+      printedDebit:printedDebit, printedCredit:printedCredit, printedBalance:printedBalance, printedCRDR:printedCRDR,
+      reconciled:reconciled
+    };
+  }
+
+  async function processArrayBuffer(name, arrayBuffer, source){
+    logEvent('Reading ' + name + '…');
+    try {
+      var text = await extractFullText(arrayBuffer);
+      var acct = parseAccountText(text, name);
+      if (!acct){ logEvent('⚠ ' + name + ': not a recognized passbook/statement layout', 'warn'); return; }
+      acct.source = source || 'upload';
+      state.accounts.push(acct);
+      logEvent('✓ ' + name + ' — ' + acct.accountName + ' — ' + acct.rows.length + ' txns — ' + (acct.reconciled ? 'reconciled ✓' : 'check totals ⚠'), acct.reconciled ? 'ok' : 'warn');
+    } catch(e){
+      logEvent('⚠ ' + name + ': ' + e.message, 'warn');
+    }
+  }
+
+  function renderAccounts(){
+    accountsLabel.style.display = state.accounts.length ? 'block' : 'none';
+    if (!state.accounts.length){
+      accountsSection.innerHTML = '<div class="empty-state">No statements parsed yet — drop a PDF above.</div>';
+    } else {
+      accountsSection.innerHTML = state.accounts.map(function(a){
+        var rowsHtml = a.rows.map(function(r){
+          return '<tr><td>'+r.date+'</td><td class="mono">'+(r.refNo||'')+'</td><td>'+escapeHtml(r.particulars)+
+            '</td><td class="num debit">'+(r.debit?fmt(r.debit):'')+
+            '</td><td class="num credit">'+(r.credit?fmt(r.credit):'')+
+            '</td><td class="num">'+fmt(r.balance)+' '+r.crdr+'</td></tr>';
+        }).join('');
+        return '' +
+        '<article class="acct-card">' +
+          '<div class="acct-head">' +
+            '<div>' +
+              '<div class="acct-name">' + escapeHtml(a.accountName) + '</div>' +
+              '<div class="acct-meta">' + escapeHtml(a.bankLine) + ' · A/C ' + a.accountNumber + '</div>' +
+              '<div class="acct-meta">' + a.periodFrom + ' – ' + a.periodTo + ' · ' + escapeHtml(a.fileName) + '</div>' +
+            '</div>' +
+            '<span class="badge ' + (a.reconciled ? 'badge-ok' : 'badge-warn') + '">' + (a.reconciled ? 'Reconciled ✓' : 'Check totals ⚠') + '</span>' +
+          '</div>' +
+          '<div class="acct-stats">' +
+            '<div><span class="stat-label">Opening</span><span class="stat-val">' + fmt(a.openingBalance) + ' ' + a.openingCRDR + '</span></div>' +
+            '<div><span class="stat-label">Debit</span><span class="stat-val debit">' + fmt(a.totalDebit) + '</span></div>' +
+            '<div><span class="stat-label">Credit</span><span class="stat-val credit">' + fmt(a.totalCredit) + '</span></div>' +
+            '<div><span class="stat-label">Closing</span><span class="stat-val">' + fmt(a.closingBalance) + ' ' + a.closingCRDR + '</span></div>' +
+            '<div><span class="stat-label">Txns</span><span class="stat-val">' + a.rows.length + '</span></div>' +
+          '</div>' +
+          '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Ref.</th><th>Particulars</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>' +
+        '</article>';
+      }).join('');
+    }
+    var totalTx = state.accounts.reduce(function(s,a){ return s + a.rows.length; }, 0);
+    var hasAccounts = state.accounts.length > 0;
+    statusEmpty.hidden = hasAccounts;
+    statusStats.hidden = !hasAccounts;
+    statAccounts.textContent = state.accounts.length;
+    statTxns.textContent = totalTx;
+    downloadBtn.disabled = !hasAccounts;
+  }
+
+  function styleHeaderRow(row, n){
+    for (var i=1;i<=n;i++){
+      var c = row.getCell(i);
+      c.font = { name:'Calibri', bold:true, size:10.5, color:{argb:'FFFFFFFF'} };
+      c.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF0E6B57'} };
+      c.alignment = { vertical:'middle' };
+      c.border = thinBorder();
+    }
+  }
+  function thinBorder(){
+    return { top:{style:'thin',color:{argb:'FFD7DED9'}}, left:{style:'thin',color:{argb:'FFD7DED9'}},
+             bottom:{style:'thin',color:{argb:'FFD7DED9'}}, right:{style:'thin',color:{argb:'FFD7DED9'}} };
+  }
+  function signed(v,crdr){ return crdr==='DR' ? -v : v; }
+  function sanitizeSheetName(s, used){
+    var name = String(s).replace(/[\[\]\*\/\\\?:]/g,'').slice(0,31) || 'Account';
+    var base = name, n = 2;
+    while (used[name]) { name = (base.slice(0, 28) + ' (' + n + ')'); n++; }
+    used[name] = true;
+    return name;
+  }
+
+  async function buildWorkbook(accounts){
+    var wb = new ExcelJS.Workbook();
+    wb.creator = 'PassSheet';
+    wb.created = new Date();
+    var moneyFmt = '#,##,##0.00;[Red]-#,##,##0.00';
+    var dateFmt = 'dd-mmm-yyyy';
+
+    var usedNames = {};
+    accounts.forEach(function(a){
+      var sheetName = sanitizeSheetName(a.accountNumber || a.fileName, usedNames);
+      var ws = wb.addWorksheet(sheetName, { views:[{ state:'frozen', ySplit:6 }] });
+      ws.mergeCells('A1:G1'); ws.getCell('A1').value = a.bankLine || 'Bank Statement';
+      ws.getCell('A1').font = { name:'Calibri', size:14, bold:true, color:{argb:'FF0E6B57'} };
+      ws.mergeCells('A2:G2'); ws.getCell('A2').value = a.accountName;
+      ws.getCell('A2').font = { name:'Calibri', size:11.5, bold:true };
+      ws.mergeCells('A3:G3');
+      ws.getCell('A3').value = { richText: [
+        { font:{ name:'Calibri', size:10, color:{argb:'FF5C6D64'} }, text:'Account No. ' + a.accountNumber + '   ·   Period ' + a.periodFrom + ' to ' + a.periodTo + '   ·   ' },
+        { font:{ name:'Calibri', size:10, bold:true, color:{argb: a.reconciled ? 'FF0E6B57' : 'FF9A6A0A'} }, text: a.reconciled ? 'Reconciled ✓' : 'Check totals ⚠' }
+      ] };
+
+      var moneyCrdrFmt = '#,##,##0.00" CR";#,##,##0.00" DR"';
+      var tileFill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFF2F5F3'} };
+      var tileBorderR = { right:{style:'thin',color:{argb:'FFD7DED9'}} };
+      ws.mergeCells('A4:B4'); ws.getCell('A4').value = 'OPENING';
+      ws.getCell('C4').value = 'DEBIT';
+      ws.getCell('D4').value = 'CREDIT';
+      ws.mergeCells('E4:F4'); ws.getCell('E4').value = 'CLOSING';
+      ws.getCell('G4').value = 'TXNS';
+      ['A4','C4','D4','E4','G4'].forEach(function(addr){
+        ws.getCell(addr).font = { name:'Calibri', size:8.5, bold:true, color:{argb:'FF5C6D64'} };
+      });
+
+      ws.mergeCells('A5:B5'); ws.getCell('A5').value = signed(a.openingBalance, a.openingCRDR); ws.getCell('A5').numFmt = moneyCrdrFmt;
+      ws.getCell('C5').value = a.totalDebit; ws.getCell('C5').numFmt = moneyFmt; ws.getCell('C5').font = { name:'Calibri', size:11, bold:true, color:{argb:'FFA5432B'} };
+      ws.getCell('D5').value = a.totalCredit; ws.getCell('D5').numFmt = moneyFmt; ws.getCell('D5').font = { name:'Calibri', size:11, bold:true, color:{argb:'FF0E6B57'} };
+      ws.mergeCells('E5:F5'); ws.getCell('E5').value = signed(a.closingBalance, a.closingCRDR); ws.getCell('E5').numFmt = moneyCrdrFmt;
+      ws.getCell('G5').value = a.rows.length;
+      ['A5','C5','D5','E5','G5'].forEach(function(addr){
+        var cell = ws.getCell(addr);
+        cell.font = cell.font || { name:'Calibri', size:11, bold:true };
+        cell.alignment = { vertical:'middle' };
+      });
+      ['A4','B4','C4','D4','E4','F4','G4','A5','B5','C5','D5','E5','F5','G5'].forEach(function(addr){
+        ws.getCell(addr).fill = tileFill;
+      });
+      ['B4','B5','C4','C5','D4','D5','F4','F5'].forEach(function(addr){
+        ws.getCell(addr).border = tileBorderR;
+      });
+      ws.getRow(4).height = 14;
+      ws.getRow(5).height = 20;
+
+      var hh = ['S.No','Date','Ref. No.','Particulars','Debit (Rs.)','Credit (Rs.)','Balance (Rs.)'];
+      var hRow = ws.getRow(6);
+      hh.forEach(function(h,i){ hRow.getCell(i+1).value = h; });
+      styleHeaderRow(hRow, hh.length);
+
+      var rIdx = 7;
+      var openRow = ws.getRow(rIdx++);
+      var od = parseDDMMYYYY(a.periodFrom);
+      if (od){ openRow.getCell(2).value = od; openRow.getCell(2).numFmt = dateFmt; }
+      openRow.getCell(4).value = 'Opening Balance';
+      openRow.getCell(7).value = signed(a.openingBalance, a.openingCRDR);
+      openRow.getCell(7).numFmt = moneyFmt;
+      for (var oc=1; oc<=7; oc++){ openRow.getCell(oc).font = { name:'Calibri', italic:true, size:10.5, color:{argb:'FF5C6D64'} }; }
+
+      a.rows.forEach(function(row, i){
+        var r = ws.getRow(rIdx++);
+        r.getCell(1).value = row.sno;
+        var d = parseDDMMYYYY(row.date);
+        if (d){ r.getCell(2).value = d; r.getCell(2).numFmt = dateFmt; } else { r.getCell(2).value = row.date; }
+        r.getCell(3).value = row.refNo || '';
+        r.getCell(4).value = row.particulars;
+        r.getCell(5).value = row.debit || null;
+        r.getCell(6).value = row.credit || null;
+        r.getCell(7).value = row.balance;
+        [5,6,7].forEach(function(c){ r.getCell(c).numFmt = moneyFmt; });
+        for (var rc=1; rc<=7; rc++){
+          var cell = r.getCell(rc);
+          cell.font = { name:'Calibri', size:10.5 };
+          cell.border = thinBorder();
+        }
+        if (i % 2 === 1){ for (var fc=1; fc<=7; fc++){ r.getCell(fc).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFF2F5F3'} }; } }
+      });
+
+      var totRow = ws.getRow(rIdx++);
+      totRow.getCell(4).value = 'Total';
+      totRow.getCell(5).value = a.totalDebit;
+      totRow.getCell(6).value = a.totalCredit;
+      totRow.getCell(7).value = signed(a.closingBalance, a.closingCRDR);
+      [5,6,7].forEach(function(c){ totRow.getCell(c).numFmt = moneyFmt; });
+      for (var tc=1; tc<=7; tc++){ totRow.getCell(tc).font = { name:'Calibri', bold:true, size:10.5 }; totRow.getCell(tc).border = { top:{style:'medium'} }; }
+
+      ws.columns.forEach(function(col,i){ col.width = [7,13,14,42,14,14,15][i]; });
+      ws.autoFilter = { from:{ row:6, column:1 }, to:{ row:6, column:7 } };
+    });
+
+    return wb;
+  }
+  async function getDownloadsCap(){
+    try {
+      if (window.claude && typeof window.claude.use === 'function'){
+        return await window.claude.use('downloads');
+      }
+    } catch(e){}
+    return null;
+  }
+
+  function anchorDownload(blob, filename){
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
+  }
+
+  async function downloadWorkbook(){
+    if (!state.accounts.length) return;
+    downloadBtn.disabled = true;
+    var prevLabel = downloadBtn.textContent;
+    downloadBtn.textContent = 'Building workbook…';
+    try {
+      var wb = await buildWorkbook(state.accounts);
+      var buffer = await wb.xlsx.writeBuffer();
+      var blob = new Blob([buffer], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      var filename = state.accounts.length === 1
+        ? ('Statement_' + state.accounts[0].accountNumber + '.xlsx')
+        : ('PassSheet_Statements_' + state.accounts.length + 'accounts.xlsx');
+
+      var dl = await getDownloadsCap();
+      if (dl){
+        try {
+          await dl.save({ filename:filename, data:blob });
+          logEvent('Saved ' + filename, 'ok');
+        } catch(err){
+          if (err && err.code === 'declined'){
+            logEvent('Download cancelled', 'warn');
+          } else {
+            anchorDownload(blob, filename);
+            logEvent('Downloaded ' + filename, 'ok');
+          }
+        }
+      } else {
+        anchorDownload(blob, filename);
+        logEvent('Downloaded ' + filename, 'ok');
+      }
+    } catch(e){
+      logEvent('⚠ Could not build workbook: ' + e.message, 'warn');
+    } finally {
+      downloadBtn.textContent = prevLabel;
+      downloadBtn.disabled = state.accounts.length === 0;
+    }
+  }
+
+  async function handleFiles(fileList){
+    var files = Array.prototype.slice.call(fileList).filter(function(f){ return /pdf$/i.test(f.name) || f.type === 'application/pdf'; });
+    if (!files.length) return;
+    for (var i=0;i<files.length;i++){
+      var f = files[i];
+      var buf = await f.arrayBuffer();
+      await processArrayBuffer(f.name, buf, 'upload');
+      renderAccounts();
+    }
+  }
+
+  fileInput.addEventListener('change', function(e){ handleFiles(e.target.files); fileInput.value = ''; });
+  dropzone.addEventListener('click', function(){ fileInput.click(); });
+  dropzone.addEventListener('keydown', function(e){ if (e.key==='Enter' || e.key===' '){ fileInput.click(); } });
+  dropzone.addEventListener('dragover', function(e){ e.preventDefault(); dropzone.classList.add('drag'); });
+  dropzone.addEventListener('dragleave', function(){ dropzone.classList.remove('drag'); });
+  dropzone.addEventListener('drop', function(e){
+    e.preventDefault(); dropzone.classList.remove('drag');
+    handleFiles(e.dataTransfer.files);
+  });
+  downloadBtn.addEventListener('click', downloadWorkbook);
+  clearBtn.addEventListener('click', function(){
+    state.accounts = [];
+    logBody.innerHTML = '';
+    logEvent('Cleared.');
+    renderAccounts();
+  });
+
+  renderAccounts();
+})();
+</script>
