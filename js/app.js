@@ -166,6 +166,14 @@ DATA.addressListByCustomer = DATA.addressListByCustomer || {};
 // same file again. Cheap (runs once per page load, not per lookup).
 DATA.addressList = renormalizeIdMap(DATA.addressList);
 DATA.addressListByCustomer = renormalizeIdMap(DATA.addressListByCustomer);
+/* Full Customer Master address book (Customer ID -> Address), published
+   by the main app independent of the NPA book -- see its own init comment
+   in NPA-DASHBOARD's js/app.js. This is what lets addressForAcctNo()
+   resolve an address for a KCC Overdue/PNPA account, neither of which
+   exists in DATA.npa.rows at all (confirmed: disjoint account universes,
+   zero overlap) -- Alok, 2026-09-25: "fir kcc overdue main kyun nahi aa
+   raha" (why isn't it showing in KCC Overdue). */
+DATA.customerAddressMap = renormalizeIdMap(DATA.customerAddressMap || {});
 /* Read-only accessors for same-origin Utility Hub iframe tools (currently
    just tools/branch-split.html) that need the live, already-decrypted
    address maps without re-implementing PIN decryption themselves. Each
@@ -3344,7 +3352,11 @@ function renormalizeIdMap(map){
 // upload/publish swaps in a new DATA.npa object rather than mutating the
 // old one), so this can never serve a stale map after a refresh.
 let __addrByAcctCache = { forRows: null, map: null };
-function addressForAcctNo(acctNo){
+// custId is optional -- passed by callers whose own rows carry one (KCC
+// Overdue, PNPA) so an account absent from the NPA book can still resolve
+// via DATA.customerAddressMap, the one address source that isn't scoped to
+// "currently in the NPA book" (see that map's own init comment).
+function addressForAcctNo(acctNo, custId){
   const rows = DATA.npa && DATA.npa.rows;
   if(__addrByAcctCache.forRows !== rows){
     const m = new Map();
@@ -3352,7 +3364,11 @@ function addressForAcctNo(acctNo){
     __addrByAcctCache = { forRows: rows, map: m };
   }
   const key = normId(acctNo);
-  return __addrByAcctCache.map.get(key) || DATA.addressList[key] || DATA.addressListByCustomer[key] || '';
+  const custKey = custId ? normId(custId) : '';
+  return __addrByAcctCache.map.get(key)
+    || DATA.addressList[key] || DATA.addressListByCustomer[key]
+    || (custKey ? DATA.customerAddressMap[custKey] : '')
+    || '';
 }
 
 /* ---------- Cleaning rules for mobile / PAN / Aadhar (confirmed against real HO data) ---------- */
@@ -5911,7 +5927,7 @@ function renderDashboard(){
    actionable). Rows are stored as compact arrays (see PC below) instead
    of the full 35-column HO layout -- only the fields this tab actually
    uses are kept. */
-const PC = {REGION:0, BRANCH:1, SCHEME:2, ACCT:3, NAME:4, OS:5, CADU:6, LIMIT:7, REVIEW:8, REASON:9, CUSTNPADATE:10};
+const PC = {REGION:0, BRANCH:1, SCHEME:2, ACCT:3, NAME:4, OS:5, CADU:6, LIMIT:7, REVIEW:8, REASON:9, CUSTNPADATE:10, CUST_ID:11};
 /* "Limit Review" is its own bucket, pulled out ahead of the scheme-based
    split -- an account flagged Limit Review is routed there regardless of
    scheme code, so KCC/KCC-AH/Other only ever show accounts NOT already
@@ -6321,9 +6337,11 @@ window.setPnpaSlipTab = setPnpaSlipTab;
 
 // PNPA rows carry no per-row address of their own -- resolved via the
 // shared addressForAcctNo() (see its own comment near normId()), which
-// looks at the main NPA book's own already-merged addresses first.
-function pnpaAddressFor(acctNo){
-  return addressForAcctNo(acctNo);
+// looks at the main NPA book's own already-merged addresses first, falling
+// back to the Customer-ID-keyed DATA.customerAddressMap (via custId, when
+// PNPA_DATA has one) since PNPA accounts don't exist in the NPA book.
+function pnpaAddressFor(acctNo, custId){
+  return addressForAcctNo(acctNo, custId);
 }
 // Sortable via the same generic applySort()/nextSort()/updateSortIcons()
 // engine Dashboard's All Accounts table and every other sortable table in
@@ -6338,12 +6356,12 @@ window.sortPnpaSlipBy = sortPnpaSlipBy;
 function renderPnpaSlipTable(list, emptyMessage){
   if(pnpaAddressFilter){
     const q = pnpaAddressFilter.trim().toLowerCase();
-    list = list.filter(r=>pnpaAddressFor(r[PC.ACCT]).toLowerCase().includes(q));
+    list = list.filter(r=>pnpaAddressFor(r[PC.ACCT], r[PC.CUST_ID]).toLowerCase().includes(q));
   }
   if(!list.length) return `<div class="empty-state"><p>${esc(emptyMessage || 'No accounts slipped in this period.')}</p></div>`;
   const remarks = getPnpaRemarks();
   const objs = list.map(r=>({
-    acctNo:r[PC.ACCT], name:r[PC.NAME], address:pnpaAddressFor(r[PC.ACCT]), os:r[PC.OS], cadu:r[PC.CADU],
+    acctNo:r[PC.ACCT], name:r[PC.NAME], address:pnpaAddressFor(r[PC.ACCT], r[PC.CUST_ID]), os:r[PC.OS], cadu:r[PC.CADU],
     custNpaDate:r[PC.CUSTNPADATE], remark: remarks[r[PC.ACCT]] || '',
   }));
   const sorted = applySort(objs, pnpaSlipSort);
@@ -6471,7 +6489,7 @@ window.renderPnpaSlipView = renderPnpaSlipView;
    needed -- but the parser still defensively drops any stray non-Hathras row in
    case a future export widens scope. Only rows matching one of the 3 known scheme
    codes are kept; there is no "Other" catch-all bucket here (unlike PNPA). */
-const KC = {BRANCH:0, SCHEME:1, ACCT:2, NAME:3, OS:4, CADU:5, LIMIT:6, REVIEW:7, CUSTNPADATE:8, FY:9, CATEGORY:10, SMA:11, REASON:12};
+const KC = {BRANCH:0, SCHEME:1, ACCT:2, NAME:3, OS:4, CADU:5, LIMIT:6, REVIEW:7, CUSTNPADATE:8, FY:9, CATEGORY:10, SMA:11, REASON:12, CUST_ID:13};
 /* KCC Overdue rows carry only the branch name string (uppercase, e.g.
    "HATHRAS AGRA ROAD") -- match it back to the frozen BRANCH_LIST to show
    Sol ID alongside it in the Datewise Calendar view. */
@@ -6640,9 +6658,13 @@ function renderKccOverdue(){
 
 // KCC Overdue's own rows carry no per-row address of their own -- resolved
 // via the shared addressForAcctNo() (see its own comment near normId()),
-// which looks at the main NPA book's own already-merged addresses first.
-function kccovAddressFor(acctNo){
-  return addressForAcctNo(acctNo);
+// which looks at the main NPA book's own already-merged addresses first,
+// falling back to the Customer-ID-keyed DATA.customerAddressMap (via
+// custId, when KCC_OVERDUE_DATA has one) since KCC Overdue accounts don't
+// exist in the NPA book at all. Alok, 2026-09-25: "fir kcc overdue main
+// kyun nahi aa raha" (why isn't it showing in KCC Overdue).
+function kccovAddressFor(acctNo, custId){
+  return addressForAcctNo(acctNo, custId);
 }
 function kccovFilteredRows(d){
   let rows = d.rows;
@@ -6650,7 +6672,7 @@ function kccovFilteredRows(d){
   if(kccovFyFilter) rows = rows.filter(r=>r[KC.FY]===kccovFyFilter);
   if(kccovAddressFilter){
     const q = kccovAddressFilter.trim().toLowerCase();
-    rows = rows.filter(r=>kccovAddressFor(r[KC.ACCT]).toLowerCase().includes(q));
+    rows = rows.filter(r=>kccovAddressFor(r[KC.ACCT], r[KC.CUST_ID]).toLowerCase().includes(q));
   }
   if(kccovDateMode==='month' && kccovMonthFilter){
     const [y,m] = kccovMonthFilter.split('-').map(Number);
@@ -6824,7 +6846,7 @@ function renderKccOverdueBranchTable(filteredRows){
   if(!wrap) return;
   const activeScheme = KCC_OVERDUE_SCHEMES.find(s=>s.key===kccovSchemeTab);
   const unsorted = filteredRows.filter(r=>kccOverdueBucketOf(r[KC.SCHEME])===kccovSchemeTab).map(r=>({
-    acctNo:r[KC.ACCT], name:r[KC.NAME], address:kccovAddressFor(r[KC.ACCT]), os:r[KC.OS], cadu:r[KC.CADU], limit:r[KC.LIMIT],
+    acctNo:r[KC.ACCT], name:r[KC.NAME], address:kccovAddressFor(r[KC.ACCT], r[KC.CUST_ID]), os:r[KC.OS], cadu:r[KC.CADU], limit:r[KC.LIMIT],
     custNpaDate:r[KC.CUSTNPADATE], fy:r[KC.FY], category:r[KC.CATEGORY], sma:r[KC.SMA],
   }));
   const list = applySort(unsorted, kccovBranchSort);
@@ -7231,7 +7253,7 @@ function kccovShowBranchAccounts(bucket, branch, custNpaDate){
   const filteredRows = kccovFilteredRows(KCC_OVERDUE_DATA);
   let rows = filteredRows.filter(r=>kccOverdueBucketOf(r[KC.SCHEME])===bucket && r[KC.BRANCH]===branch);
   if(custNpaDate) rows = rows.filter(r=>r[KC.CUSTNPADATE]===custNpaDate);
-  const list = rows.map(r=>({ acctNo:r[KC.ACCT], name:r[KC.NAME], address:kccovAddressFor(r[KC.ACCT]), os:r[KC.OS], cadu:r[KC.CADU], limit:r[KC.LIMIT], custNpaDate:r[KC.CUSTNPADATE], fy:r[KC.FY], category:r[KC.CATEGORY], sma:r[KC.SMA] }));
+  const list = rows.map(r=>({ acctNo:r[KC.ACCT], name:r[KC.NAME], address:kccovAddressFor(r[KC.ACCT], r[KC.CUST_ID]), os:r[KC.OS], cadu:r[KC.CADU], limit:r[KC.LIMIT], custNpaDate:r[KC.CUSTNPADATE], fy:r[KC.FY], category:r[KC.CATEGORY], sma:r[KC.SMA] }));
   const sLabel = (KCC_OVERDUE_SCHEMES.find(s=>s.key===bucket)||{}).label || bucket;
   const subLabel = custNpaDate ? `Hathras · Cust NPA Date ${custNpaDate} · ${list.length.toLocaleString('en-IN')} account(s)` : `Hathras · ${list.length.toLocaleString('en-IN')} account(s)`;
   showKccovListModal(`${branch} — ${sLabel}`, subLabel, list);
@@ -7328,7 +7350,7 @@ function kccovFilterByBucketKey(scoped, bucketKey){
   return scoped.filter(r=>kccOverdueBucketOf(r[KC.SCHEME])===bucketKey); // kcc/kccah/od023
 }
 function kccovRowsToModalList(rows){
-  return rows.map(r=>({ acctNo:r[KC.ACCT], name:r[KC.NAME], address:kccovAddressFor(r[KC.ACCT]), os:r[KC.OS], cadu:r[KC.CADU], limit:r[KC.LIMIT], custNpaDate:r[KC.CUSTNPADATE], fy:r[KC.FY], category:r[KC.CATEGORY], sma:r[KC.SMA] }));
+  return rows.map(r=>({ acctNo:r[KC.ACCT], name:r[KC.NAME], address:kccovAddressFor(r[KC.ACCT], r[KC.CUST_ID]), os:r[KC.OS], cadu:r[KC.CADU], limit:r[KC.LIMIT], custNpaDate:r[KC.CUSTNPADATE], fy:r[KC.FY], category:r[KC.CATEGORY], sma:r[KC.SMA] }));
 }
 function kccovShowBifurcationAccounts(fy, monthKey, monthLabel, bucketKey){
   const base = kccovFilteredRows(KCC_OVERDUE_DATA).filter(r=>{
