@@ -4964,7 +4964,16 @@ function showQuickAcctDetail(source, row){
   ];
   document.getElementById('quickAcctTitle').textContent = title || '—';
   document.getElementById('quickAcctSub').innerHTML = sub;
-  document.getElementById('quickAcctGrid').innerHTML = fields.map(([k,v])=>`<div><div class="k">${esc(k)}</div><div class="v">${esc(v!==null&&v!==undefined&&v!==''?v:'—')}</div></div>`).join('');
+  // Account No (15 digits) and Reason (can be several comma-joined codes)
+  // are the two fields most likely to be longer than a narrow grid column
+  // on a phone -- give them their own full-width row instead of letting
+  // them wrap mid-digit/mid-word inside a half-width cell (Alok's own
+  // screenshot, 2026-09-25, showed exactly this: "1501351100 02325" split
+  // across two lines).
+  const FULL_WIDTH_KEYS = ['Account No', 'Reason'];
+  document.getElementById('quickAcctGrid').innerHTML = fields.map(([k,v])=>
+    `<div${FULL_WIDTH_KEYS.includes(k)?' class="full"':''}><div class="k">${esc(k)}</div><div class="v">${esc(v!==null&&v!==undefined&&v!==''?v:'—')}</div></div>`
+  ).join('');
   document.getElementById('quickAcctModalOverlay').classList.add('show');
 }
 window.showQuickAcctDetail = showQuickAcctDetail;
@@ -5549,6 +5558,29 @@ function dashboardCornerStats(s){
   html += '</div>';
   return html;
 }
+/* Recovery Dashboard (branch portal) only -- Today's NPA total, the gap
+   against the existing March 2026 baseline (DATA.branchAdvances/npaMar26,
+   the same figure dashboardCornerStats() above already shows in
+   miniature), and a placeholder for the branch's target ahead of the
+   NEXT fiscal year-end (March 2027) -- not yet available anywhere in this
+   app's data, shown honestly as "Not set" rather than guessed. These are
+   all NPA-position figures, not slippage figures, so they belong here on
+   the Dashboard rather than on the PNPA Slippage page (Alok's own
+   correction, 2026-09-25 -- they had briefly been placed there instead). */
+function dashboardNpaTargetStrip(branchName){
+  const solId = loggedInSolId();
+  const todayNpa = computeDashboardStats(branchName || null).totalOS;
+  const adv = solId ? DATA.branchAdvances[String(solId)] : null;
+  const marGapHtml = (adv && adv.npaMar26!=null)
+    ? (()=>{ const gap = todayNpa - adv.npaMar26; const improved = gap<=0;
+        return `<div class="npa-target-tile"><span class="lbl">Gap from March 2026</span><span class="val" style="color:${improved?'var(--green)':'var(--red)'}">${improved?'▼':'▲'} ${fmtCr(Math.abs(gap))}</span></div>`; })()
+    : `<div class="npa-target-tile"><span class="lbl">Gap from March 2026</span><span class="val muted">Baseline not uploaded</span></div>`;
+  return `<div class="npa-target-strip">
+    <div class="npa-target-tile"><span class="lbl">Today's NPA</span><span class="val">${fmtCr(todayNpa)}</span></div>
+    ${marGapHtml}
+    <div class="npa-target-tile"><span class="lbl">Target for March 2027</span><span class="val muted">Not set yet</span></div>
+  </div>`;
+}
 
 /* Branch profile card shown at the top of the Dashboard. A single branch
    picked from #dashBranchFilter reads its Sol ID off s.branchMap (captured
@@ -5683,6 +5715,7 @@ function renderDashboard(){
 
   el.innerHTML = `
     ${dashboardBranchInfoCard(branchFilter, s)}
+    ${lockedBranch ? dashboardNpaTargetStrip(lockedBranch) : ''}
     <div class="hero-kpi-row">
       ${heroKpiCard({id:'heroTotalOs', label:'Total Outstanding', fallback:fmtCr(s.totalOS), sub:s.totalAccounts.toLocaleString('en-IN')+' accounts', icon:ICON_BANKNOTE, tint:'var(--accent-soft)', color:'var(--accent)', badge:heroNpaBadge, corner:heroCorner})}
       ${heroKpiCard({id:'heroTotalAccts', label:'Total Accounts', fallback:s.totalAccounts.toLocaleString('en-IN'), sub:s.custCount.toLocaleString('en-IN')+' unique customers', icon:ICON_USERS, tint:'var(--gauge-track)', color:'var(--accent-2)'})}
@@ -6161,7 +6194,7 @@ function setPnpaSlipTab(tab){ pnpaSlipTab = tab; renderPnpaSlipView(); }
 window.setPnpaSlipTab = setPnpaSlipTab;
 
 function renderPnpaSlipTable(list){
-  if(!list.length) return `<div class="empty-state"><p>Is period mein koi account slip nahi hua.</p></div>`;
+  if(!list.length) return `<div class="empty-state"><p>No accounts slipped in this period.</p></div>`;
   const remarks = getPnpaRemarks();
   const rowsHtml = list.map(r=>{
     const acct = esc(r[PC.ACCT]);
@@ -6179,7 +6212,7 @@ function renderPnpaSlipTable(list){
     </tr>`;
   }).join('');
   return `<div class="dash-table-wrap"><table class="dash-table pnpa-slip-table">
-    <thead><tr><th>Account</th><th class="tal">Name</th><th>Balance</th><th>CADU</th><th>Cust NPA Date</th><th class="tal">Remark <span class="pnpa-remark-note">(is device par save hota hai)</span></th></tr></thead>
+    <thead><tr><th>Account</th><th class="tal">Name</th><th>Balance</th><th>CADU</th><th>Cust NPA Date</th><th class="tal">Remark <span class="pnpa-remark-note">(saved on this device only)</span></th></tr></thead>
     <tbody>${rowsHtml}</tbody>
   </table></div>`;
 }
@@ -6190,26 +6223,37 @@ function pnpaSlipSummaryChips(totals){
     <div class="pnpa-slip-chip total"><span class="lbl">Total</span><span class="cnt">${totals.all.cnt.toLocaleString('en-IN')} A/C</span><span class="amt">${fmtINR2(totals.all.amt)}</span></div>
   </div>`;
 }
-// "Aaj ka NPA" (this branch's current total NPA O/S, from the main NPA
-// dataset already loaded for Dashboard) + "Last March se gap" (reuses
-// DATA.branchAdvances/npaMar26, the exact same figure Dashboard's own
-// corner-stats already show -- see dashboardCornerStats()). "Is month ka
-// target" and "Next March se gap" are deliberately NOT shown yet -- no
-// per-branch forward target exists anywhere in this app's data today;
-// flagged to Alok as a follow-up once he defines how that number gets in.
-function pnpaSlipNpaStrip(branchName){
-  const solId = loggedInSolId();
-  const s = computeDashboardStats(branchName || null);
-  const todayNpa = s.totalOS;
-  const adv = solId ? DATA.branchAdvances[String(solId)] : null;
-  const marGapHtml = (adv && adv.npaMar26!=null)
-    ? (()=>{ const gap = todayNpa - adv.npaMar26; const improved = gap<=0;
-        return `<div class="pnpa-npa-tile"><span class="lbl">Last March se Gap</span><span class="val" style="color:${improved?'var(--green)':'var(--red)'}">${improved?'▼':'▲'} ${fmtCr(Math.abs(gap))}</span></div>`; })()
-    : `<div class="pnpa-npa-tile"><span class="lbl">Last March se Gap</span><span class="val muted">Baseline upload nahi hui</span></div>`;
-  return `<div class="pnpa-npa-strip">
-    <div class="pnpa-npa-tile"><span class="lbl">Aaj ka NPA</span><span class="val">${fmtCr(todayNpa)}</span></div>
-    ${marGapHtml}
-    <div class="pnpa-npa-tile"><span class="lbl">Is Month ka Target</span><span class="val muted">Set nahi hai — jald add hoga</span></div>
+/* Alok's own explicit instruction (2026-09-25): lead the PNPA Slippage
+   page with 3 hero blocks for TODAY specifically -- Total Slippage, KCC
+   Slippage, and "Non-KCC & Technical" -- ahead of the Today/This Week/
+   This Month tabs below, since today's fresh slippage is the most
+   actionable figure for a branch manager. "Technical" is a category he
+   has not defined yet ("use baad mein bataunga") -- this block currently
+   shows the same figure as the existing Non-KCC total until he defines
+   what should be split out of it; labelled honestly below rather than
+   inventing a filter for a category with no definition yet. Clicking any
+   card jumps to the Today tab, which already lists these exact accounts. */
+function pnpaTodayHeroBlocks(todayTotals){
+  return `<div class="pnpa-today-hero">
+    <div class="pnpa-today-hero-head">Today's Slippage</div>
+    <div class="pnpa-today-hero-row">
+      <div class="pnpa-today-card total clickable" onclick="setPnpaSlipTab('today')">
+        <span class="lbl">Total Slippage</span>
+        <span class="cnt">${todayTotals.all.cnt.toLocaleString('en-IN')} A/C</span>
+        <span class="amt">${fmtINR2(todayTotals.all.amt)}</span>
+      </div>
+      <div class="pnpa-today-card kcc clickable" onclick="setPnpaSlipTab('today')">
+        <span class="lbl">KCC Slippage</span>
+        <span class="cnt">${todayTotals.kcc.cnt.toLocaleString('en-IN')} A/C</span>
+        <span class="amt">${fmtINR2(todayTotals.kcc.amt)}</span>
+      </div>
+      <div class="pnpa-today-card nonkcc clickable" onclick="setPnpaSlipTab('today')">
+        <span class="lbl">Non-KCC &amp; Technical</span>
+        <span class="cnt">${todayTotals.nonkcc.cnt.toLocaleString('en-IN')} A/C</span>
+        <span class="amt">${fmtINR2(todayTotals.nonkcc.amt)}</span>
+        <span class="note">Technical breakdown to be added</span>
+      </div>
+    </div>
   </div>`;
 }
 function renderPnpaSlipView(){
@@ -6230,7 +6274,7 @@ function renderPnpaSlipView(){
   ).join('')}</div>`;
   const active = agg[pnpaSlipTab];
   el.innerHTML = `
-    ${pnpaSlipNpaStrip(branchName)}
+    ${pnpaTodayHeroBlocks(agg.today.totals)}
     ${tabsHtml}
     ${pnpaSlipSummaryChips(active.totals)}
     ${renderPnpaSlipTable(active.list)}

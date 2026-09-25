@@ -2101,12 +2101,27 @@ html,body{overscroll-behavior:none}
    (Alok's own framing, 2026-09-25: "treat it like the whole website"). */
 .recovery-branch-lock{display:inline-flex;align-items:center;font-size:15px;font-weight:800;color:var(--ink);letter-spacing:.2px}
 
+/* ---------- Recovery Dashboard (branch portal): NPA position strip
+   (Dashboard view only -- moved off the PNPA Slippage page per Alok's own
+   correction, 2026-09-25: these are NPA-position figures, not slippage
+   figures) ---------- */
+.npa-target-strip{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0 18px}
+.npa-target-tile{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-md);padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.npa-target-tile .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--sub);font-weight:800}
+.npa-target-tile .val{font-size:17px;font-weight:800;color:var(--ink)}
+.npa-target-tile .val.muted{font-size:12.5px;font-weight:700;color:var(--ink-mute)}
+
 /* ---------- Recovery Dashboard (branch portal): PNPA Slippage ---------- */
-.pnpa-npa-strip{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}
-.pnpa-npa-tile{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-md);padding:12px 14px;display:flex;flex-direction:column;gap:4px}
-.pnpa-npa-tile .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--sub);font-weight:800}
-.pnpa-npa-tile .val{font-size:17px;font-weight:800;color:var(--ink)}
-.pnpa-npa-tile .val.muted{font-size:12.5px;font-weight:700;color:var(--ink-mute)}
+.pnpa-today-hero{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-md);padding:16px 16px 14px;margin-bottom:16px}
+.pnpa-today-hero-head{font-size:11px;text-transform:uppercase;letter-spacing:.6px;font-weight:800;color:var(--sub);margin-bottom:10px}
+.pnpa-today-hero-row{display:flex;gap:12px;flex-wrap:wrap}
+.pnpa-today-card{flex:1;min-width:150px;background:var(--stripe);border:1px solid var(--line);border-radius:var(--radius-md);padding:12px 14px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:border-color .15s var(--ease),background .15s var(--ease)}
+.pnpa-today-card:hover{border-color:var(--accent);background:var(--accent-soft)}
+.pnpa-today-card.total{background:var(--accent-soft);border-color:var(--accent)}
+.pnpa-today-card .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--sub);font-weight:800}
+.pnpa-today-card .cnt{font-size:12.5px;font-weight:700;color:var(--ink)}
+.pnpa-today-card .amt{font-size:17px;font-weight:800;color:var(--ink)}
+.pnpa-today-card .note{font-size:9.5px;color:var(--ink-mute);font-style:italic;margin-top:2px}
 .pnpa-tab-count{display:inline-block;margin-left:4px;padding:1px 7px;border-radius:20px;background:rgba(0,0,0,.08);font-size:10.5px;font-weight:800}
 .pnpa-slip-summary{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
 .pnpa-slip-chip{flex:1;min-width:130px;background:var(--stripe);border:1px solid var(--line);border-radius:var(--radius-md);padding:10px 12px;display:flex;flex-direction:column;gap:2px}
@@ -2520,6 +2535,19 @@ header.app-head::before,.detail-head::before{
 #listModalOverlay .modal-sheet{border-radius:22px}
 #quickAcctModalOverlay{align-items:center}
 #quickAcctModalOverlay .modal-sheet{border-radius:22px}
+/* Quick Account Detail's own field grid -- a dedicated class rather than
+   reusing the shared .info-grid (used elsewhere for the branch profile
+   card), so this fix can't affect that other usage. Responsive column
+   count (auto-fit) instead of a fixed 2-col/4-col media-query pair, plus
+   an explicit .full class for fields too long to sit in a narrow column
+   (Account No, Reason -- see showQuickAcctDetail() in js/app.js) rather
+   than letting them wrap mid-digit/mid-word (Alok's own screenshot,
+   2026-09-25, showed exactly that). */
+.qad-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:16px 16px;margin-top:14px}
+.qad-grid .k{font-size:9.5px;text-transform:uppercase;color:var(--sub);font-weight:700;letter-spacing:.7px}
+.qad-grid .v{font-size:13.5px;font-weight:700;color:var(--ink);margin-top:4px;font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qad-grid .full{grid-column:1/-1}
+.qad-grid .full .v{white-space:normal;overflow:visible;text-overflow:clip;word-break:break-word;letter-spacing:.2px}
 .list-modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}
 @media (max-width:659px){
   .list-modal-head{flex-wrap:wrap}
