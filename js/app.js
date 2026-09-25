@@ -4558,8 +4558,8 @@ function downloadDailyTemplate(){
   downloadCsvTemplate('UPGB_Daily_NPA_Template.csv', headers, example);
 }
 function downloadMasterTemplate(){
-  const headers = ['Customer ID (CIF)','Customer Name','Address','Mobile No','Aadhar No','PAN'];
-  const example = ['705760143','EXAMPLE BORROWER NAME','VILL EXAMPLE, POST EXAMPLE, DISTRICT, UP - 000000','9999999999','123456789012','ABCDE1234F'];
+  const headers = ['Customer ID (CIF)','Customer Name','Address','Aadhar No','PAN'];
+  const example = ['705760143','EXAMPLE BORROWER NAME','VILL EXAMPLE, POST EXAMPLE, DISTRICT, UP - 000000','123456789012','ABCDE1234F'];
   downloadCsvTemplate('UPGB_Customer_Master_Template.csv', headers, example);
 }
 function downloadBranchAdvTemplate(){
@@ -4912,8 +4912,8 @@ function renderCmdk(q){
     for(const r of DATA.npa.rows){
       if(mySolId && String(r[C.SOL_ID])!==String(mySolId)) continue;
       const name=String(r[C.NAME]||'').toLowerCase(), acct=String(r[C.ACCT_NO]||'').toLowerCase(),
-        cust=String(r[C.CUST_ID]||'').toLowerCase(), ph=String(r[C.PHONE]||'').toLowerCase();
-      if(name.includes(q)||acct.includes(q)||cust.includes(q)||ph.includes(q)){
+        cust=String(r[C.CUST_ID]||'').toLowerCase();
+      if(name.includes(q)||acct.includes(q)||cust.includes(q)){
         const cid=String(r[C.CUST_ID]); if(seen.has(cid)) continue; seen.add(cid);
         out.push({source:'npa', row:r});
         if(out.length>=12) break;
@@ -4931,7 +4931,7 @@ function renderCmdk(q){
     }
   }
   cmdkMatches=out; cmdkActive=0;
-  if(!q){ cmdkResults.innerHTML='<div class="cmdk-empty">Type a name, account no., customer ID or mobile…</div>'; return; }
+  if(!q){ cmdkResults.innerHTML='<div class="cmdk-empty">Type a name, account no. or customer ID…</div>'; return; }
   if(!out.length){ cmdkResults.innerHTML='<div class="cmdk-empty">No borrower found for that.</div>'; return; }
   /* out is already contiguous by source (the three loops above push npa,
      then kccov, then pnpa matches in that order) -- grouping here only
@@ -4988,7 +4988,7 @@ function showQuickAcctDetail(source, row){
     ['Account No', row[C.ACCT_NO]], ['Customer ID', row[C.CUST_ID]], ['Scheme', row[C.SCHEME]],
     ['Outstanding', fmtINR2(row[C.OUTBAL])], ['Asset Class', row[C.SYS_SUBCLASS]||row[C.ASSET]],
     ['Sanction Date', fmtDate(toDate(row[C.SANCT_DT]))], ['Sanction Limit', fmtINR2(row[C.SANCT_LIM])],
-    ['NPA Date', fmtDate(toDate(row[C.NPA_DT]))], ['Phone', row[C.PHONE]],
+    ['NPA Date', fmtDate(toDate(row[C.NPA_DT]))],
   ] : isKcc ? [
     ['Account No', row[KC.ACCT]], ['Scheme', row[KC.SCHEME]], ['Outstanding', fmtINR2(row[KC.OS])],
     ['CADU', fmtINR2(row[KC.CADU])], ['Limit', fmtINR2(row[KC.LIMIT])], ['Cust NPA Date', row[KC.CUSTNPADATE]],

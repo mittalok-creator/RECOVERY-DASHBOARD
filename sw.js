@@ -1,4 +1,4 @@
-const CACHE_NAME = 'recovery-dashboard-shell-v5';
+const CACHE_NAME = 'recovery-dashboard-shell-v6';
 // Recovery Dashboard (branch portal) -- forked from npadashboard.alokmittal.net's
 // own sw.js. Same stale-while-revalidate shell + network-first data pattern;
 // only the SHELL_ASSETS list changed (js/login.js instead of js/auth.js/
@@ -9,8 +9,8 @@ const SHELL_ASSETS = [
   './',
   './index.html',
   './css/styles.css?v=20260925c',
-  './js/app.js?v=20260925d',
-  './js/login.js?v=20260924a',
+  './js/app.js?v=20260925e',
+  './js/login.js?v=20260925a',
   './manifest.webmanifest',
 ];
 

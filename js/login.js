@@ -78,12 +78,28 @@
       value = ''; paint(); locked = false;
     }, 420);
   }
+  // 9269 is R O Hathras's own Sol ID -- also, separately, the production
+  // site's master decrypt PIN (see DATA_DECRYPT_KEY above). Alok, 2026-09-25:
+  // block it as a login here specifically, with its own message distinct
+  // from a plain "not recognised" -- this stays a real, valid Sol ID
+  // everywhere else in the app (branch data, dropdowns), only the login
+  // screen itself refuses it.
+  function rejectBlockedPin() {
+    locked = true;
+    setError('This PIN is blocked — use your correct Sol ID as PIN');
+    wrap.classList.add('shake');
+    setTimeout(() => {
+      wrap.classList.remove('shake');
+      value = ''; paint(); locked = false;
+    }, 420);
+  }
   function shakeIncomplete() {
     wrap.classList.add('shake');
     setTimeout(() => wrap.classList.remove('shake'), 420);
   }
   function submit() {
     if (locked || value.length !== 4) { shakeIncomplete(); return; }
+    if (value === '9269') { rejectBlockedPin(); return; }
     if (isValidSolId(value)) unlock(value); else reject();
   }
   function push(d) {

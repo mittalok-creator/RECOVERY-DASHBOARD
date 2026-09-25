@@ -732,7 +732,7 @@
   <div class="cmdk-box" role="dialog" aria-label="Quick search">
     <div class="cmdk-inputrow">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-      <input type="text" id="cmdkInput" placeholder="Jump to any borrower — name, A/c, Cust ID, mobile…" autocomplete="off" spellcheck="false">
+      <input type="text" id="cmdkInput" placeholder="Jump to any borrower — name, A/c, Cust ID…" autocomplete="off" spellcheck="false">
       <span class="cmdk-hint" id="cmdkClose">ESC</span>
     </div>
     <div class="cmdk-results" id="cmdkResults"></div>
@@ -821,7 +821,7 @@
       <div class="upload-drop small" id="masterUploadDrop">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
         <div class="main" id="masterUploadDropLabel">Tap to choose the Customer Master file</div>
-        <div class="sub">.xlsx or .csv — Customer ID, Name, Address, Mobile, Aadhar, PAN</div>
+        <div class="sub">.xlsx or .csv — Customer ID, Name, Address, Aadhar, PAN</div>
       </div>
       <input type="file" id="masterFileInput" accept=".xlsx,.xlsb,.xls,.csv" style="display:none">
       <button type="button" class="template-download-link" id="downloadMasterTemplateBtn">⬇ Download blank template (Customer Master)</button>
@@ -1219,9 +1219,9 @@
      by ensureXLSX()/ensureExcelJS()/ensureHtml2Canvas()/ensureJsPDF()/
      ensureMsal() near the top of js/app.js -- see that file for the one
      place their version query strings now live. -->
-<script src="js/login.js?v=20260924a"></script>
+<script src="js/login.js?v=20260925a"></script>
 <script id="ots-data" type="application/json">{}</script>
-<script src="js/app.js?v=20260925d"></script>
+<script src="js/app.js?v=20260925e"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
