@@ -2097,6 +2097,27 @@ html,body{overscroll-behavior:none}
    minus the pointer/focus affordances, since it isn't interactive. */
 .recovery-branch-lock{display:inline-flex;align-items:center;cursor:default}
 
+/* ---------- Recovery Dashboard (branch portal): PNPA Slippage ---------- */
+.pnpa-npa-strip{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.pnpa-npa-tile{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-md);padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.pnpa-npa-tile .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--sub);font-weight:800}
+.pnpa-npa-tile .val{font-size:17px;font-weight:800;color:var(--ink)}
+.pnpa-npa-tile .val.muted{font-size:12.5px;font-weight:700;color:var(--ink-mute)}
+.pnpa-tab-count{display:inline-block;margin-left:4px;padding:1px 7px;border-radius:20px;background:rgba(0,0,0,.08);font-size:10.5px;font-weight:800}
+.pnpa-slip-summary{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+.pnpa-slip-chip{flex:1;min-width:130px;background:var(--stripe);border:1px solid var(--line);border-radius:var(--radius-md);padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.pnpa-slip-chip.total{background:var(--accent-soft);border-color:var(--accent)}
+.pnpa-slip-chip .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--sub);font-weight:800}
+.pnpa-slip-chip .cnt{font-size:12.5px;font-weight:700;color:var(--ink)}
+.pnpa-slip-chip .amt{font-size:14.5px;font-weight:800;color:var(--ink)}
+.pnpa-remark-input{font:inherit;font-size:12px;padding:6px 9px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);width:100%;min-width:120px}
+.pnpa-remark-input:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 2px var(--accent-soft)}
+.pnpa-remark-status{display:none;font-size:10px;color:var(--green);font-weight:700;margin-top:3px}
+.pnpa-remark-status.show{display:block}
+.pnpa-remark-note{font-weight:500;text-transform:none;letter-spacing:0;color:var(--ink-mute);font-size:10px}
+table.pnpa-slip-table td{white-space:normal}
+table.pnpa-slip-table td:last-child{min-width:160px}
+
 /* ---------- Dashboard: KCC / Non-KCC split stat ---------- */
 .split-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;width:100%}
 .split-stat{border-radius:var(--radius-md);padding:14px 16px;border:1px solid var(--line)}

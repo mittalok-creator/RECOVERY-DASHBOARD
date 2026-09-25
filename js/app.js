@@ -5791,7 +5791,7 @@ function renderDashboard(){
    actionable). Rows are stored as compact arrays (see PC below) instead
    of the full 35-column HO layout -- only the fields this tab actually
    uses are kept. */
-const PC = {REGION:0, BRANCH:1, SCHEME:2, ACCT:3, NAME:4, OS:5, CADU:6, LIMIT:7, REVIEW:8, REASON:9};
+const PC = {REGION:0, BRANCH:1, SCHEME:2, ACCT:3, NAME:4, OS:5, CADU:6, LIMIT:7, REVIEW:8, REASON:9, CUSTNPADATE:10};
 /* "Limit Review" is its own bucket, pulled out ahead of the scheme-based
    split -- an account flagged Limit Review is routed there regardless of
    scheme code, so KCC/KCC-AH/Other only ever show accounts NOT already
@@ -5823,7 +5823,7 @@ function parsePnpaRows(headerCells, dataRows){
   const idx = (name) => header.indexOf(normHeader(name));
   const iRegion=idx('region'), iBranch=idx('branch'), iAcct=idx('accountno'), iScheme=idx('schemecode'),
     iName=idx('accountname'), iBal=idx('balanceamount'), iCadu=idx('cadu'), iLimit=idx('limit'),
-    iReview=idx('reviewdate'), iReasons=idx('reasons');
+    iReview=idx('reviewdate'), iReasons=idx('reasons'), iCustNpa=idx('custnpadate');
   const missing = [];
   if(iAcct<0) missing.push('Account No');
   if(iBranch<0) missing.push('Branch');
@@ -5844,12 +5844,14 @@ function parsePnpaRows(headerCells, dataRows){
     let acctNo = acctRaw;
     if(looksScientific(acctRaw)) acctNo = expandSci(acctRaw);
     const reviewDt = toDate(iReview>=0?row[iReview]:'');
+    const custNpaDt = toDate(iCustNpa>=0?row[iCustNpa]:'');
     rows.push([
       region, cellStr(row, iBranch), cellStr(row, iScheme), acctNo, cellStr(row, iName),
       bal, parseFloat(row[iCadu])||0,
       iLimit>=0 ? (parseFloat(row[iLimit])||0) : 0,
       reviewDt ? fmtDate(reviewDt) : '',
       iReasons>=0 ? formatPnpaReasons(cellStr(row, iReasons)) : '',
+      custNpaDt ? fmtDate(custNpaDt) : '',
     ]);
   }
   return rows;
@@ -5910,11 +5912,21 @@ function renderPnpaDashboard(){
   if(!el) return;
   if(PNPA_DATA){ renderPnpaDashboardBody(); return; }
   el.innerHTML = `<div class="empty-state"><div class="data-loading-spinner" aria-hidden="true" style="position:static;border-color:rgba(58,123,255,.25);border-top-color:var(--accent)"></div><p style="margin-top:14px">Loading Daily PNPA data…</p></div>`;
-  fetchJson('data/pnpa.json?t=' + Date.now())
+  fetchJson(DATA_ORIGIN + 'data/pnpa.json?t=' + Date.now())
     .then(d => { PNPA_DATA = d; renderPnpaDashboardBody(); })
     .catch(() => {
       el.innerHTML = `<div class="empty-state"><h2>Could not load Daily PNPA data</h2><p>Check your internet connection, then tap Refresh.</p></div>`;
     });
+}
+// Recovery Dashboard (branch portal): loader for the NEW "PNPA Slippage"
+// view (below) -- shares PNPA_DATA with the old hidden renderPnpaDashboard()
+// above (never wired into this portal's nav) so a fetch is never duplicated
+// if both happen to run in the same session.
+function ensurePnpaDataLoaded(onReady, onError){
+  if(PNPA_DATA){ onReady(); return; }
+  fetchJson(DATA_ORIGIN + 'data/pnpa.json?t=' + Date.now())
+    .then(d => { PNPA_DATA = d; onReady(); })
+    .catch(onError);
 }
 
 function pnpaBranchAgg(rows, bucket){
@@ -6043,6 +6055,188 @@ function pnpaShowBranchAccounts(bucket, branch){
   showPnpaListModal(`${branch} — ${bLabel}`, `Hathras · ${list.length.toLocaleString('en-IN')} account(s)`, list);
 }
 window.pnpaShowBranchAccounts = pnpaShowBranchAccounts;
+
+/* ==================================================================
+   Recovery Dashboard (branch portal) only -- "PNPA Slippage" tracker.
+   Alok's own confirmed definition (asked directly, since the real "Daily
+   PNPA" export's Cust NPA Date turned out to be a RECORD of when an
+   account already became NPA, not a future prediction -- confirmed by
+   direct inspection of his real file, 2026-09-25: every row with a
+   non-zero Balance Amount already has this date set, and none of the
+   Balance-Amount-zero rows do): "Today/This Week/This Month" means
+   accounts that slipped INTO NPA that recently, grouped by Cust NPA Date,
+   not a forward projection. Reuses PC/parsePnpaRows/PNPA_DATA (the
+   existing "Daily PNPA" pipeline) unchanged -- this is a new view on the
+   same data, not a new upload. */
+const PNPA_SLIP_TABS = [
+  {key:'today', label:'Today'},
+  {key:'week', label:'This Week'},
+  {key:'month', label:'This Month'},
+];
+// Rolling day-count bands from "today" (the viewer's own clock), not
+// calendar week/month boundaries -- simpler and unambiguous, and matches
+// how Alok described it ("aaj", "is week", "is month") as a sequence of
+// widening recency windows, not calendar-aligned ones.
+function pnpaSlipBucketOf(custNpaDateStr, today){
+  const d = toDate(custNpaDateStr);
+  if(!d) return null;
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startOfRow = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const daysAgo = Math.round((startOfToday - startOfRow) / 86400000);
+  if(daysAgo < 0) return null; // a Cust NPA Date in the future shouldn't occur (see comment above) -- defensive, not shown anywhere
+  if(daysAgo === 0) return 'today';
+  if(daysAgo <= 7) return 'week';
+  if(daysAgo <= 31) return 'month';
+  return null; // older than a month -- out of scope for this tracker
+}
+function pnpaSlipSchemeKey(row){ return row[PC.SCHEME]==='CC004' ? 'kcc' : 'nonkcc'; }
+function pnpaEmptySlipTotals(){ return { kcc:{cnt:0,amt:0}, nonkcc:{cnt:0,amt:0}, all:{cnt:0,amt:0} }; }
+function pnpaAddRowToSlipTotals(t, row){
+  const k = pnpaSlipSchemeKey(row);
+  t[k].cnt++; t[k].amt += row[PC.OS];
+  t.all.cnt++; t.all.amt += row[PC.OS];
+}
+// Aggregates PNPA_DATA.rows (already the whole, unfiltered Region=HATHRAS
+// dataset -- PNPA_DATA itself carries every branch, same as KCC Overdue's
+// own KCC_OVERDUE_DATA) into { today: {totals, list}, week: {...}, month: {...} },
+// scoped to one branch (the locked branch -- see loggedInBranchName()-style
+// resolution below, done per-dataset since PC.BRANCH's exact spelling can
+// differ from C.SOL_DESC's, same caveat as KCC Overdue's own branch lock).
+function pnpaAggregateSlippage(rows, branch, today){
+  const out = { today:{totals:pnpaEmptySlipTotals(), list:[]}, week:{totals:pnpaEmptySlipTotals(), list:[]}, month:{totals:pnpaEmptySlipTotals(), list:[]} };
+  for(const r of rows){
+    if(branch && r[PC.BRANCH]!==branch) continue;
+    const bucket = pnpaSlipBucketOf(r[PC.CUSTNPADATE], today);
+    if(!bucket) continue;
+    pnpaAddRowToSlipTotals(out[bucket].totals, r);
+    out[bucket].list.push(r);
+  }
+  Object.values(out).forEach(o=>o.list.sort((a,b)=>b[PC.OS]-a[PC.OS]));
+  return out;
+}
+// Resolves the logged-in Sol ID to THIS dataset's own branch-name spelling,
+// same KCCOV_BRANCH_SOL-based technique KCC Overdue's branch lock already
+// uses (PC.BRANCH strings come from the same kind of HO export as
+// KC.BRANCH, not guaranteed to match C.SOL_DESC's spelling exactly).
+let __pnpaLockedBranch = null;
+function pnpaLoggedInBranchName(rows){
+  if(__pnpaLockedBranch !== null) return __pnpaLockedBranch;
+  const solId = loggedInSolId();
+  if(!solId){ __pnpaLockedBranch = ''; return __pnpaLockedBranch; }
+  const allBranches = [...new Set(rows.map(r=>r[PC.BRANCH]))];
+  __pnpaLockedBranch = allBranches.find(b=>String(KCCOV_BRANCH_SOL[String(b).toUpperCase()])===String(solId)) || '';
+  return __pnpaLockedBranch;
+}
+
+/* ---------- Remark: device-local only for now (Alok's own explicit
+   instruction, 2026-09-25 -- "abhi provision karo, mere paas Synology ka
+   home server hai, future mein use configure karenge") -- a real synced
+   backend is planned but not built yet. Stored in this browser's own
+   localStorage, keyed by Account No., same non-published pattern as this
+   app's existing OTS Amount/Interest Reversal overrides (js/app.js,
+   'upgb-ots-amounts'/'upgb-uri-overrides') -- explicitly NOT the Special
+   Note pattern (which publishes and is shared with every viewer), since
+   there is no publish pipeline on this read-only portal at all. Framed
+   plainly in the UI as device-only so a branch manager doesn't assume a
+   colleague on another device/phone will see the same remark. ---------- */
+const PNPA_REMARK_KEY = 'upgb-pnpa-remarks';
+function getPnpaRemarks(){
+  try{ return JSON.parse(localStorage.getItem(PNPA_REMARK_KEY) || '{}'); }catch(e){ return {}; }
+}
+function savePnpaRemark(acctNo, text){
+  try{
+    const map = getPnpaRemarks();
+    if(text && text.trim()) map[acctNo] = text.trim(); else delete map[acctNo];
+    localStorage.setItem(PNPA_REMARK_KEY, JSON.stringify(map));
+  }catch(e){ /* private mode / quota -- remark is a convenience, not critical */ }
+}
+window.savePnpaRemark = function(acctNo, inputEl){
+  savePnpaRemark(acctNo, inputEl.value);
+  const status = inputEl.closest('tr')?.querySelector('.pnpa-remark-status');
+  if(status){ status.textContent = 'Saved on this device'; status.classList.add('show'); setTimeout(()=>status.classList.remove('show'), 1600); }
+};
+
+let pnpaSlipTab = 'today';
+function setPnpaSlipTab(tab){ pnpaSlipTab = tab; renderPnpaSlipView(); }
+window.setPnpaSlipTab = setPnpaSlipTab;
+
+function renderPnpaSlipTable(list){
+  if(!list.length) return `<div class="empty-state"><p>Is period mein koi account slip nahi hua.</p></div>`;
+  const remarks = getPnpaRemarks();
+  const rowsHtml = list.map(r=>{
+    const acct = esc(r[PC.ACCT]);
+    const remark = esc(remarks[r[PC.ACCT]] || '');
+    return `<tr>
+      <td class="clickable" onclick="showQuickAcctDetailByAcct('pnpa','${acct}')">${acct}</td>
+      <td class="tal clickable" onclick="showQuickAcctDetailByAcct('pnpa','${acct}')">${esc(r[PC.NAME])||'—'}</td>
+      <td>${fmtINR2(r[PC.OS])}</td>
+      <td>${fmtINR2(r[PC.CADU])}</td>
+      <td>${esc(r[PC.CUSTNPADATE])||'—'}</td>
+      <td class="tal">
+        <input type="text" class="pnpa-remark-input" value="${remark}" placeholder="Remark…" onchange="savePnpaRemark('${acct}', this)">
+        <span class="pnpa-remark-status">Saved on this device</span>
+      </td>
+    </tr>`;
+  }).join('');
+  return `<div class="dash-table-wrap"><table class="dash-table pnpa-slip-table">
+    <thead><tr><th>Account</th><th class="tal">Name</th><th>Balance</th><th>CADU</th><th>Cust NPA Date</th><th class="tal">Remark <span class="pnpa-remark-note">(is device par save hota hai)</span></th></tr></thead>
+    <tbody>${rowsHtml}</tbody>
+  </table></div>`;
+}
+function pnpaSlipSummaryChips(totals){
+  return `<div class="pnpa-slip-summary">
+    <div class="pnpa-slip-chip"><span class="lbl">KCC</span><span class="cnt">${totals.kcc.cnt.toLocaleString('en-IN')} A/C</span><span class="amt">${fmtINR2(totals.kcc.amt)}</span></div>
+    <div class="pnpa-slip-chip"><span class="lbl">Non-KCC</span><span class="cnt">${totals.nonkcc.cnt.toLocaleString('en-IN')} A/C</span><span class="amt">${fmtINR2(totals.nonkcc.amt)}</span></div>
+    <div class="pnpa-slip-chip total"><span class="lbl">Total</span><span class="cnt">${totals.all.cnt.toLocaleString('en-IN')} A/C</span><span class="amt">${fmtINR2(totals.all.amt)}</span></div>
+  </div>`;
+}
+// "Aaj ka NPA" (this branch's current total NPA O/S, from the main NPA
+// dataset already loaded for Dashboard) + "Last March se gap" (reuses
+// DATA.branchAdvances/npaMar26, the exact same figure Dashboard's own
+// corner-stats already show -- see dashboardCornerStats()). "Is month ka
+// target" and "Next March se gap" are deliberately NOT shown yet -- no
+// per-branch forward target exists anywhere in this app's data today;
+// flagged to Alok as a follow-up once he defines how that number gets in.
+function pnpaSlipNpaStrip(branchName){
+  const solId = loggedInSolId();
+  const s = computeDashboardStats(branchName || null);
+  const todayNpa = s.totalOS;
+  const adv = solId ? DATA.branchAdvances[String(solId)] : null;
+  const marGapHtml = (adv && adv.npaMar26!=null)
+    ? (()=>{ const gap = todayNpa - adv.npaMar26; const improved = gap<=0;
+        return `<div class="pnpa-npa-tile"><span class="lbl">Last March se Gap</span><span class="val" style="color:${improved?'var(--green)':'var(--red)'}">${improved?'▼':'▲'} ${fmtCr(Math.abs(gap))}</span></div>`; })()
+    : `<div class="pnpa-npa-tile"><span class="lbl">Last March se Gap</span><span class="val muted">Baseline upload nahi hui</span></div>`;
+  return `<div class="pnpa-npa-strip">
+    <div class="pnpa-npa-tile"><span class="lbl">Aaj ka NPA</span><span class="val">${fmtCr(todayNpa)}</span></div>
+    ${marGapHtml}
+    <div class="pnpa-npa-tile"><span class="lbl">Is Month ka Target</span><span class="val muted">Set nahi hai — jald add hoga</span></div>
+  </div>`;
+}
+function renderPnpaSlipView(){
+  const el = document.getElementById('pnpaSlipArea');
+  if(!el) return;
+  if(!PNPA_DATA){
+    el.innerHTML = `<div class="empty-state"><div class="data-loading-spinner" aria-hidden="true" style="position:static;border-color:rgba(58,123,255,.25);border-top-color:var(--accent)"></div><p style="margin-top:14px">Loading PNPA data…</p></div>`;
+    ensurePnpaDataLoaded(renderPnpaSlipView, () => {
+      el.innerHTML = `<div class="empty-state"><h2>Could not load PNPA data</h2><p>Check your internet connection, then tap Refresh.</p></div>`;
+    });
+    return;
+  }
+  const branchName = pnpaLoggedInBranchName(PNPA_DATA.rows);
+  const today = new Date();
+  const agg = pnpaAggregateSlippage(PNPA_DATA.rows, branchName, today);
+  const tabsHtml = `<div class="bank-tab-row">${PNPA_SLIP_TABS.map(t=>
+    `<button type="button" class="bank-tab-btn${pnpaSlipTab===t.key?' active':''}" onclick="setPnpaSlipTab('${t.key}')">${t.label} <span class="pnpa-tab-count">${agg[t.key].totals.all.cnt}</span></button>`
+  ).join('')}</div>`;
+  const active = agg[pnpaSlipTab];
+  el.innerHTML = `
+    ${pnpaSlipNpaStrip(branchName)}
+    ${tabsHtml}
+    ${pnpaSlipSummaryChips(active.totals)}
+    ${renderPnpaSlipTable(active.list)}
+  `;
+}
+window.renderPnpaSlipView = renderPnpaSlipView;
 
 /* ---------- KCC Overdue -- Hathras-only, restricted to 3 schemes, rich filters ----------
    Unlike PNPA, the source "KCC Overdue" file is already Hathras-scoped (confirmed
@@ -7189,6 +7383,7 @@ function switchView(view){
       b.dataset.view===view || (UTILITY_CHILD_VIEWS.includes(view) && b.dataset.view==='utility')));
     if(view==='dashboard') renderDashboard();
     if(view==='pnpa') renderPnpaDashboard();
+    if(view==='pnpaslip') renderPnpaSlipView();
     if(view==='kccov') renderKccOverdue();
     // Resume a still-valid OneDrive sign-in silently (no popup) whenever
     // this tab is opened while it's still showing the Connect screen --
