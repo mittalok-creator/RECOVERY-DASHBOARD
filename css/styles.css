@@ -2093,9 +2093,13 @@ html,body{overscroll-behavior:none}
 .dash-select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 /* Recovery Dashboard (branch portal) only -- replaces the (hidden, not
    removed) Branch dropdown once a Sol is logged in, per js/app.js's
-   renderDashboard()/renderKccOverdueBody(). Same look as .dash-select
-   minus the pointer/focus affordances, since it isn't interactive. */
-.recovery-branch-lock{display:inline-flex;align-items:center;cursor:default}
+   renderDashboard()/renderKccOverdueBody(). Deliberately NOT styled like
+   .dash-select any more (no border/background/padding) -- this portal is
+   always scoped to exactly one branch, so a pill/box that reads as "a
+   filter is applied here" is misleading; plain bold text next to the
+   "Branch" label reads as a fact about the page, not a control on it
+   (Alok's own framing, 2026-09-25: "treat it like the whole website"). */
+.recovery-branch-lock{display:inline-flex;align-items:center;font-size:15px;font-weight:800;color:var(--ink);letter-spacing:.2px}
 
 /* ---------- Recovery Dashboard (branch portal): PNPA Slippage ---------- */
 .pnpa-npa-strip{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}

@@ -5603,7 +5603,7 @@ function renderDashboard(){
     if(filterSel.style.display !== 'none'){
       filterSel.style.display = 'none';
       const label = document.createElement('span');
-      label.className = 'dash-select recovery-branch-lock';
+      label.className = 'recovery-branch-lock';
       label.textContent = lockedBranch;
       filterSel.insertAdjacentElement('afterend', label);
     }
@@ -6480,7 +6480,7 @@ function renderKccOverdueBody(){
   const toolbar = `<div class="dash-toolbar">
       <span class="dash-toolbar-label">Branch</span>
       ${lockedKccBranch
-        ? `<span class="dash-select recovery-branch-lock">${esc(lockedKccBranch)}</span>`
+        ? `<span class="recovery-branch-lock">${esc(lockedKccBranch)}</span>`
         : `<select id="kccovBranchFilterSelect" class="dash-select">${branchFilterOptions}</select>`}
     </div>
     <div class="bank-filter-row">
@@ -7265,9 +7265,21 @@ function kccovBuildFySectionTable(fy, monthMap, color){
     });
     html += '</tr>';
   });
-  html += `<tr class="fy-total-row"><td>F.Y. ${esc(fy)} TOTAL</td>`;
-  KCCOV_BIFURCATION_GROUPS.forEach(gd=>{ const b = fyTotal[gd.key]; html += `<td class="num">${kccovFmtCnt(b.cnt)}</td><td class="num">${kccovFmtLakh(b.amt)}</td>`; });
-  html += '</tr></tbody></table>';
+  // Recovery Dashboard (branch portal): a F.Y. section with only ONE month
+  // makes this TOTAL row byte-for-byte identical to that single month's
+  // own row -- on the main multi-branch npadashboard site that's rare (an
+  // F.Y. usually spans several months across many branches' combined
+  // rows), but here, already scoped to one branch, a single-month F.Y. is
+  // the common case and the repeated-looking row reads as a bug ("ye
+  // galat hai na" -- Alok, 2026-09-25, screenshot). Skip the row entirely
+  // when it would just restate the one row already shown; still shown
+  // normally once a second month appears under the same F.Y.
+  if(monthKeys.length > 1){
+    html += `<tr class="fy-total-row"><td>F.Y. ${esc(fy)} TOTAL</td>`;
+    KCCOV_BIFURCATION_GROUPS.forEach(gd=>{ const b = fyTotal[gd.key]; html += `<td class="num">${kccovFmtCnt(b.cnt)}</td><td class="num">${kccovFmtLakh(b.amt)}</td>`; });
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
   return html;
 }
 function kccovRenderBifurcationTable(rows){
@@ -7299,9 +7311,16 @@ function kccovRenderAllBranchesTable(rows){
     });
     html += '</tr>';
   });
-  html += `<tr class="fy-total-row"><td colspan="2" class="tal">Grand Total</td>`;
-  KCCOV_BIFURCATION_GROUPS.forEach(gd=>{ const b = grand[gd.key]; html += `<td class="num">${kccovFmtCnt(b.cnt)}</td><td class="num">${kccovFmtLakh(b.amt)}</td>`; });
-  html += '</tr></tbody></table></div>';
+  // Recovery Dashboard (branch portal): locked to one branch throughout,
+  // so this table always has exactly 1 row -- a "Grand Total" identical to
+  // it is the same redundant-row problem as kccovBuildFySectionTable's own
+  // F.Y. TOTAL row above; same fix, skip it when there's nothing to sum.
+  if(branchKeys.length > 1){
+    html += `<tr class="fy-total-row"><td colspan="2" class="tal">Grand Total</td>`;
+    KCCOV_BIFURCATION_GROUPS.forEach(gd=>{ const b = grand[gd.key]; html += `<td class="num">${kccovFmtCnt(b.cnt)}</td><td class="num">${kccovFmtLakh(b.amt)}</td>`; });
+    html += '</tr>';
+  }
+  html += '</tbody></table></div>';
   return html;
 }
 
