@@ -6048,6 +6048,32 @@ function ensurePnpaDataLoaded(onReady, onError){
     .then(d => { PNPA_DATA = d; onReady(); })
     .catch(onError);
 }
+// Weekly/Monthly PNPA (Alok, 2026-09-25): their own separate published
+// files, same fetch pattern as Daily PNPA above. Deliberately NOT treated
+// as fatal if missing/unreachable -- Alok may not have uploaded either one
+// yet (a brand-new upload type), and the "Today" tab (Daily PNPA) should
+// keep working regardless -- __pnpaWeeklyFailed/__pnpaMonthlyFailed record
+// a load attempt's own failure separately from "never tried yet", so
+// renderPnpaSlipView() (below) knows to stop retrying and just render an
+// empty Week/Month tab rather than looping forever or blocking the page.
+let PNPA_WEEKLY_DATA = null, __pnpaWeeklyFailed = false, __pnpaWeeklyLoading = false;
+function ensurePnpaWeeklyDataLoaded(onReady){
+  if(PNPA_WEEKLY_DATA || __pnpaWeeklyFailed){ onReady(); return; }
+  if(__pnpaWeeklyLoading) return;
+  __pnpaWeeklyLoading = true;
+  fetchJson(DATA_ORIGIN + 'data/pnpa-weekly.json?t=' + Date.now())
+    .then(d => { PNPA_WEEKLY_DATA = d; __pnpaWeeklyLoading = false; onReady(); })
+    .catch(() => { __pnpaWeeklyFailed = true; __pnpaWeeklyLoading = false; onReady(); });
+}
+let PNPA_MONTHLY_DATA = null, __pnpaMonthlyFailed = false, __pnpaMonthlyLoading = false;
+function ensurePnpaMonthlyDataLoaded(onReady){
+  if(PNPA_MONTHLY_DATA || __pnpaMonthlyFailed){ onReady(); return; }
+  if(__pnpaMonthlyLoading) return;
+  __pnpaMonthlyLoading = true;
+  fetchJson(DATA_ORIGIN + 'data/pnpa-monthly.json?t=' + Date.now())
+    .then(d => { PNPA_MONTHLY_DATA = d; __pnpaMonthlyLoading = false; onReady(); })
+    .catch(() => { __pnpaMonthlyFailed = true; __pnpaMonthlyLoading = false; onReady(); });
+}
 
 function pnpaBranchAgg(rows, bucket){
   const map = new Map();
@@ -6193,21 +6219,19 @@ const PNPA_SLIP_TABS = [
   {key:'week', label:'This Week'},
   {key:'month', label:'This Month'},
 ];
-// Rolling day-count bands from "today" (the viewer's own clock), not
-// calendar week/month boundaries -- simpler and unambiguous, and matches
-// how Alok described it ("aaj", "is week", "is month") as a sequence of
-// widening recency windows, not calendar-aligned ones.
+// "Today" is still bucketed off Daily PNPA's own Cust NPA Date, since that
+// file is a whole-book snapshot (every account currently on Head Office's
+// PNPA watch, whenever it slipped) rather than something already scoped to
+// just today -- a Cust NPA Date of today, relative to the viewer's own
+// clock, is what actually means "slipped today" here.
 function pnpaSlipBucketOf(custNpaDateStr, today){
   const d = toDate(custNpaDateStr);
   if(!d) return null;
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const startOfRow = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const daysAgo = Math.round((startOfToday - startOfRow) / 86400000);
-  if(daysAgo < 0) return null; // a Cust NPA Date in the future shouldn't occur (see comment above) -- defensive, not shown anywhere
-  if(daysAgo === 0) return 'today';
-  if(daysAgo <= 7) return 'week';
-  if(daysAgo <= 31) return 'month';
-  return null; // older than a month -- out of scope for this tracker
+  if(daysAgo !== 0) return null; // in the future (shouldn't occur) or any day but today
+  return 'today';
 }
 function pnpaSlipSchemeKey(row){ return row[PC.SCHEME]==='CC004' ? 'kcc' : 'nonkcc'; }
 function pnpaEmptySlipTotals(){ return { kcc:{cnt:0,amt:0}, nonkcc:{cnt:0,amt:0}, all:{cnt:0,amt:0} }; }
@@ -6216,23 +6240,37 @@ function pnpaAddRowToSlipTotals(t, row){
   t[k].cnt++; t[k].amt += row[PC.OS];
   t.all.cnt++; t.all.amt += row[PC.OS];
 }
-// Aggregates PNPA_DATA.rows (already the whole, unfiltered Region=HATHRAS
-// dataset -- PNPA_DATA itself carries every branch, same as KCC Overdue's
-// own KCC_OVERDUE_DATA) into { today: {totals, list}, week: {...}, month: {...} },
-// scoped to one branch (the locked branch -- see loggedInBranchName()-style
-// resolution below, done per-dataset since PC.BRANCH's exact spelling can
-// differ from C.SOL_DESC's, same caveat as KCC Overdue's own branch lock).
-function pnpaAggregateSlippage(rows, branch, today){
-  const out = { today:{totals:pnpaEmptySlipTotals(), list:[]}, week:{totals:pnpaEmptySlipTotals(), list:[]}, month:{totals:pnpaEmptySlipTotals(), list:[]} };
+// Today: filtered out of the Daily PNPA whole-book snapshot by Cust NPA
+// Date, scoped to one branch (the locked branch -- PC.BRANCH's exact
+// spelling can differ from C.SOL_DESC's, same caveat as KCC Overdue's own
+// branch lock, resolved via pnpaLoggedInBranchName() below).
+function pnpaAggregateToday(rows, branch, today){
+  const totals = pnpaEmptySlipTotals(), list = [];
   for(const r of rows){
     if(branch && r[PC.BRANCH]!==branch) continue;
-    const bucket = pnpaSlipBucketOf(r[PC.CUSTNPADATE], today);
-    if(!bucket) continue;
-    pnpaAddRowToSlipTotals(out[bucket].totals, r);
-    out[bucket].list.push(r);
+    if(pnpaSlipBucketOf(r[PC.CUSTNPADATE], today)!=='today') continue;
+    pnpaAddRowToSlipTotals(totals, r);
+    list.push(r);
   }
-  Object.values(out).forEach(o=>o.list.sort((a,b)=>b[PC.OS]-a[PC.OS]));
-  return out;
+  list.sort((a,b)=>b[PC.OS]-a[PC.OS]);
+  return { totals, list };
+}
+// This Week/This Month: Alok confirmed directly (2026-09-25) that these
+// are their OWN separate files from Head Office, already scoped to that
+// exact period ("this week's slippage" / "this month's slippage" as a
+// genuine, authoritative report -- not a whole-book snapshot needing a
+// date-window filter applied on this end) -- so every row is shown as-is,
+// branch-filtered only, same shape as Daily PNPA (parsePnpaRows/PC), just
+// published as its own file (data/pnpa-weekly.json/data/pnpa-monthly.json).
+function pnpaAggregatePeriod(rows, branch){
+  const totals = pnpaEmptySlipTotals(), list = [];
+  for(const r of (rows||[])){
+    if(branch && r[PC.BRANCH]!==branch) continue;
+    pnpaAddRowToSlipTotals(totals, r);
+    list.push(r);
+  }
+  list.sort((a,b)=>b[PC.OS]-a[PC.OS]);
+  return { totals, list };
 }
 // Resolves the logged-in Sol ID to THIS dataset's own branch-name spelling,
 // same KCCOV_BRANCH_SOL-based technique KCC Overdue's branch lock already
@@ -6287,12 +6325,12 @@ window.setPnpaSlipTab = setPnpaSlipTab;
 function pnpaAddressFor(acctNo){
   return addressForAcctNo(acctNo);
 }
-function renderPnpaSlipTable(list){
+function renderPnpaSlipTable(list, emptyMessage){
   if(pnpaAddressFilter){
     const q = pnpaAddressFilter.trim().toLowerCase();
     list = list.filter(r=>pnpaAddressFor(r[PC.ACCT]).toLowerCase().includes(q));
   }
-  if(!list.length) return `<div class="empty-state"><p>No accounts slipped in this period.</p></div>`;
+  if(!list.length) return `<div class="empty-state"><p>${esc(emptyMessage || 'No accounts slipped in this period.')}</p></div>`;
   const remarks = getPnpaRemarks();
   const rowsHtml = list.map(r=>{
     const acct = esc(r[PC.ACCT]);
@@ -6365,13 +6403,30 @@ function renderPnpaSlipView(){
     });
     return;
   }
+  // Weekly/Monthly are optional -- a load attempt (success or failure) is
+  // required before rendering so the tab counts/table don't flash "no
+  // data" and then correct themselves a moment later, but a failure (most
+  // likely: the file simply hasn't been uploaded yet, a brand-new upload
+  // type) never blocks the whole page -- only that one tab shows its own
+  // clear empty state below, "Today" (Daily PNPA) keeps working regardless.
+  if(!PNPA_WEEKLY_DATA && !__pnpaWeeklyFailed){ ensurePnpaWeeklyDataLoaded(renderPnpaSlipView); return; }
+  if(!PNPA_MONTHLY_DATA && !__pnpaMonthlyFailed){ ensurePnpaMonthlyDataLoaded(renderPnpaSlipView); return; }
   const branchName = pnpaLoggedInBranchName(PNPA_DATA.rows);
   const today = new Date();
-  const agg = pnpaAggregateSlippage(PNPA_DATA.rows, branchName, today);
+  const agg = {
+    today: pnpaAggregateToday(PNPA_DATA.rows, branchName, today),
+    week: pnpaAggregatePeriod(PNPA_WEEKLY_DATA ? PNPA_WEEKLY_DATA.rows : [], branchName),
+    month: pnpaAggregatePeriod(PNPA_MONTHLY_DATA ? PNPA_MONTHLY_DATA.rows : [], branchName),
+  };
   const tabsHtml = `<div class="bank-tab-row">${PNPA_SLIP_TABS.map(t=>
     `<button type="button" class="bank-tab-btn${pnpaSlipTab===t.key?' active':''}" onclick="setPnpaSlipTab('${t.key}')">${t.label} <span class="pnpa-tab-count">${agg[t.key].totals.all.cnt}</span></button>`
   ).join('')}</div>`;
   const active = agg[pnpaSlipTab];
+  const emptyMessages = {
+    today: 'No accounts slipped today.',
+    week: __pnpaWeeklyFailed ? 'No Weekly PNPA file uploaded yet.' : 'No accounts in this week\'s slippage file.',
+    month: __pnpaMonthlyFailed ? 'No Monthly PNPA file uploaded yet.' : 'No accounts in this month\'s slippage file.',
+  };
   el.innerHTML = `
     ${pnpaTodayHeroBlocks(agg.today.totals)}
     ${tabsHtml}
@@ -6379,7 +6434,7 @@ function renderPnpaSlipView(){
       <input type="text" id="pnpaAddressFilterInput" class="dash-select" placeholder="Filter by Address…" value="${esc(pnpaAddressFilter)}" style="max-width:220px">
     </div>
     ${pnpaSlipSummaryChips(active.totals)}
-    ${renderPnpaSlipTable(active.list)}
+    ${renderPnpaSlipTable(active.list, emptyMessages[pnpaSlipTab])}
   `;
   const addrInput = document.getElementById('pnpaAddressFilterInput');
   if(addrInput) addrInput.onchange = () => { pnpaAddressFilter = addrInput.value; renderPnpaSlipView(); };
