@@ -1244,6 +1244,17 @@ function onLedgerSolIdInput(value){
   });
 }
 window.onLedgerSolIdInput = onLedgerSolIdInput;
+// Recovery Dashboard (branch portal): the Sol ID used to always start
+// blank (XXXX placeholders) and had to be typed in by hand every visit --
+// pointless here since the whole portal is already locked to one Sol ID
+// at login. Alok, 2026-09-25: "accounts slidebar main xxxx bydefault jo
+// sol id open hai wahi set kar do" -- prefill it with the logged-in Sol ID
+// by default; still a plain editable input, so it can be overridden for a
+// one-off lookup on a different branch's ledger accounts.
+(function prefillLedgerSolId(){
+  const solId = loggedInSolId();
+  if(solId) onLedgerSolIdInput(solId);
+})();
 initLedgerAcctNumbers();
 document.addEventListener('keydown', (e)=>{
   if(e.key==='Escape'){ EDGE_PANEL_KEYS.forEach(k=>toggleEdgePanel(k, false)); }
@@ -3318,6 +3329,31 @@ function renormalizeIdMap(map){
   Object.keys(map||{}).forEach(k=>{ const nk = normId(k); if(nk) out[nk] = map[k]; });
   return out;
 }
+// Recovery Dashboard (branch portal): shared Account No. -> Address lookup
+// used by KCC Overdue and PNPA Slippage (Alok, 2026-09-25: "har jagah
+// table main branch name ki jagah address column add kar do") -- their own
+// rows carry no address column of their own. The REAL, populated address
+// data on this app lives on DATA.npa.rows' own C.ADDR field (merged in at
+// upload time from Customer Master, or from DATA.addressList as a
+// fallback there already) -- DATA.addressList itself is frequently empty
+// (it's only Alok's separate, optional legacy "Address List" upload), so
+// looking it up directly here would silently return "—" for almost every
+// account even when the address is known. Built once per DATA.npa.rows
+// reference (cheap: a single pass over data already resident in memory)
+// and rebuilt automatically the moment that reference changes (a fresh
+// upload/publish swaps in a new DATA.npa object rather than mutating the
+// old one), so this can never serve a stale map after a refresh.
+let __addrByAcctCache = { forRows: null, map: null };
+function addressForAcctNo(acctNo){
+  const rows = DATA.npa && DATA.npa.rows;
+  if(__addrByAcctCache.forRows !== rows){
+    const m = new Map();
+    (rows||[]).forEach(r=>{ if(r[C.ADDR]) m.set(normId(r[C.ACCT_NO]), r[C.ADDR]); });
+    __addrByAcctCache = { forRows: rows, map: m };
+  }
+  const key = normId(acctNo);
+  return __addrByAcctCache.map.get(key) || DATA.addressList[key] || DATA.addressListByCustomer[key] || '';
+}
 
 /* ---------- Cleaning rules for mobile / PAN / Aadhar (confirmed against real HO data) ---------- */
 function cleanMobile(raw){
@@ -5092,7 +5128,7 @@ function computeDashboardStats(branchFilter){
 
     const custId = String(r[C.CUST_ID]||'');
     if(custId){
-      if(!custMap.has(custId)) custMap.set(custId, {custId, name:r[C.NAME]||'', branch, os:0, count:0});
+      if(!custMap.has(custId)) custMap.set(custId, {custId, name:r[C.NAME]||'', branch, address:r[C.ADDR]||'', os:0, count:0});
       const cu = custMap.get(custId); cu.os+=os; cu.count++;
     }
 
@@ -5109,7 +5145,7 @@ function computeDashboardStats(branchFilter){
       }
     }
 
-    acctList.push({ acctNo:acct, custId, name:r[C.NAME]||'', branch, os, asset, scheme:schemeKey, slabId: slab?slab.id:null, bucketId });
+    acctList.push({ acctNo:acct, custId, name:r[C.NAME]||'', branch, address:r[C.ADDR]||'', os, asset, scheme:schemeKey, slabId: slab?slab.id:null, bucketId, npaDate: npaDate ? fmtDate(npaDate) : '' });
   }
   let oldOtsSum=0, oldOtsCount=0;
   DATA.oldots.rows.forEach(r=>{
@@ -5235,15 +5271,16 @@ document.addEventListener('mousemove', (e)=>{
 function acctRows(list, opts){
   opts = opts || {};
   const offset = opts.offset||0;
-  if(!list.length) return emptyStateRowHtml(5, 'No accounts');
+  if(!list.length) return emptyStateRowHtml(6, 'No accounts');
   // Recovery Dashboard (branch portal): no OTS Calculator, so this opens
   // the read-only Quick Account Detail card instead of openDetail().
   return list.map((a,i)=>`<tr class="clickable" onclick="showNpaQuickDetail('${esc(a.custId)}')">
     <td>${opts.rank?`<span class="dash-rank">${i+1+offset}</span>`:''}${esc(a.acctNo)}</td>
     <td class="tal">${esc(a.name)||'—'}</td>
-    <td class="tal">${esc(a.branch)}</td>
+    <td class="tal">${esc(a.address)||'—'}</td>
     <td>${a.asset?`<span class="badge-pill ${esc(a.asset)}" title="${esc(assetLabel(a.asset))}">${esc(a.asset)}</span>`:'—'}</td>
     <td>${fmtINR2(a.os)}</td>
+    <td class="tal">${esc(a.npaDate)||'—'}</td>
   </tr>`).join('');
 }
 
@@ -5316,6 +5353,32 @@ document.addEventListener('focusin', (e)=>{
 });
 
 /* ---------- Dashboard: "All Accounts" table (sortable, lazy-scrolled) ---------- */
+// Recovery Dashboard (branch portal): Alok, 2026-09-25: "har table main
+// filter bhi add karo jisse npa date se filter kar saken ya address se
+// filter kar saken" -- Address text filter + NPA Date range, matching the
+// same filter shape already added to KCC Overdue/PNPA Slippage.
+let dashAddressFilter = '';
+let dashNpaDateFrom = '';
+let dashNpaDateTo = '';
+function dashFilterAcctList(list){
+  let out = list;
+  if(dashAddressFilter){
+    const q = dashAddressFilter.trim().toLowerCase();
+    out = out.filter(a=>String(a.address||'').toLowerCase().includes(q));
+  }
+  if(dashNpaDateFrom || dashNpaDateTo){
+    const from = dashNpaDateFrom ? new Date(dashNpaDateFrom+'T00:00:00') : null;
+    const to = dashNpaDateTo ? new Date(dashNpaDateTo+'T23:59:59') : null;
+    out = out.filter(a=>{
+      const dt = toDate(a.npaDate);
+      if(!dt) return false;
+      if(from && dt < from) return false;
+      if(to && dt > to) return false;
+      return true;
+    });
+  }
+  return out;
+}
 let acctListState = {list:[], sort:{key:'os',dir:'desc'}};
 function renderAcctListTable(resetScroll){
   const tbody = document.getElementById('acctListBody');
@@ -5351,7 +5414,7 @@ function custRows(list){
   // the read-only Quick Account Detail card instead of openDetail().
   return list.map(c=>`<tr class="clickable" onclick="showNpaQuickDetail('${esc(c.custId)}')">
     <td class="tal">${esc(c.name)||'—'}<br><span style="color:var(--ink-mute);font-weight:600;font-size:11px">Cust ID ${esc(c.custId)}</span></td>
-    <td class="tal">${esc(c.branch)}</td>
+    <td class="tal">${esc(c.address)||'—'}</td>
     <td>${c.count} A/C</td>
     <td>${fmtINR2(c.os)}</td>
   </tr>`).join('');
@@ -5360,23 +5423,29 @@ function custRows(list){
 const ACCT_LIST_HEAD = '<tr>'
   +'<th class="sortable" data-key="acctNo" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'acctNo\')">Account<span class="sort-ic">▾</span></th>'
   +'<th class="tal sortable" data-key="name" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'name\')">Customer<span class="sort-ic">▾</span></th>'
-  +'<th class="tal sortable" data-key="branch" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'branch\')">Branch<span class="sort-ic">▾</span></th>'
+  +'<th class="tal sortable" data-key="address" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'address\')">Address<span class="sort-ic">▾</span></th>'
   +'<th class="sortable" data-key="asset" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'asset\')">Asset<span class="sort-ic">▾</span></th>'
   +'<th class="sortable" data-key="os" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'os\')">Amount<span class="sort-ic">▾</span></th>'
+  +'<th class="tal sortable" data-key="npaDate" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'npaDate\')">NPA Date<span class="sort-ic">▾</span></th>'
   +'</tr>';
 const CUST_LIST_HEAD = '<tr>'
   +'<th class="tal sortable" data-key="name" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'name\')">Customer<span class="sort-ic">▾</span></th>'
-  +'<th class="tal sortable" data-key="branch" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'branch\')">Branch<span class="sort-ic">▾</span></th>'
+  +'<th class="tal sortable" data-key="address" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'address\')">Address<span class="sort-ic">▾</span></th>'
   +'<th class="sortable" data-key="count" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'count\')">Accounts<span class="sort-ic">▾</span></th>'
   +'<th class="sortable" data-key="os" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'os\')">Amount<span class="sort-ic">▾</span></th>'
   +'</tr>';
 
 /* ---------- Generic list modal (sortable, lazy-scrolled for account lists) ---------- */
 let __listModalScrollHandler = null;
-let listModalState = {list:[], type:'acct', sort:{key:'os',dir:'desc'}};
+let listModalState = {list:[], type:'acct', sort:{key:'os',dir:'desc'}, addressFilter:''};
 function renderListModalBody(resetScroll){
   const body = document.getElementById('listModalBody');
-  const sorted = applySort(listModalState.list, listModalState.sort);
+  let filtered = listModalState.list;
+  if(listModalState.addressFilter){
+    const q = listModalState.addressFilter.trim().toLowerCase();
+    filtered = filtered.filter(r=>String(r.address||'').toLowerCase().includes(q));
+  }
+  const sorted = applySort(filtered, listModalState.sort);
   listModalState.sortedList = sorted;
   updateSortIcons('listModalHead', listModalState.sort);
   if(listModalState.type==='cust'){ body.innerHTML = custRows(sorted); }
@@ -5399,7 +5468,12 @@ function showListModal(title, sub, headHTML, type, list, defaultSort){
   document.getElementById('listModalTitle').textContent = title;
   document.getElementById('listModalSub').textContent = sub || '';
   document.getElementById('listModalHead').innerHTML = headHTML;
-  listModalState = {list, type, sort: defaultSort || {key:'os',dir:'desc'}};
+  listModalState = {list, type, sort: defaultSort || {key:'os',dir:'desc'}, addressFilter:''};
+  const addrInput = document.getElementById('listModalAddressFilterInput');
+  if(addrInput){
+    addrInput.value = '';
+    addrInput.onchange = () => { listModalState.addressFilter = addrInput.value; renderListModalBody(true); };
+  }
   renderListModalBody();
   document.getElementById('listModalOverlay').classList.add('show');
   const wrap = document.getElementById('listModalBody').closest('.list-modal-scroll');
@@ -5790,20 +5864,33 @@ function renderDashboard(){
     </div>
 
     <div class="section-label">All Accounts by Outstanding<span class="chart-sub">${s.totalAccounts.toLocaleString('en-IN')} account(s) · tap a column to sort · scroll for more</span>${sectionSearchBtn()}</div>
+    <div class="bank-filter-row" style="margin-bottom:10px">
+      <input type="text" id="dashAddressFilterInput" class="dash-select" placeholder="Filter by Address…" value="${esc(dashAddressFilter)}" style="max-width:220px">
+      <input type="date" id="dashNpaDateFromInput" class="dash-select" value="${esc(dashNpaDateFrom)}" style="max-width:170px" title="NPA Date from">
+      <span style="color:var(--ink-mute);font-size:12px;align-self:center">to</span>
+      <input type="date" id="dashNpaDateToInput" class="dash-select" value="${esc(dashNpaDateTo)}" style="max-width:170px" title="NPA Date to">
+    </div>
     <div class="dash-table-wrap acct-list-scroll" id="acctListWrap">
       <table class="dash-table">
         <thead id="acctListHead"><tr>
           <th class="sortable" data-key="acctNo" tabindex="0" role="button" aria-sort="none" onclick="sortAcctListBy('acctNo')">Account<span class="sort-ic">▾</span></th>
           <th class="tal sortable" data-key="name" tabindex="0" role="button" aria-sort="none" onclick="sortAcctListBy('name')">Customer<span class="sort-ic">▾</span></th>
-          <th class="tal sortable" data-key="branch" tabindex="0" role="button" aria-sort="none" onclick="sortAcctListBy('branch')">Branch<span class="sort-ic">▾</span></th>
+          <th class="tal sortable" data-key="address" tabindex="0" role="button" aria-sort="none" onclick="sortAcctListBy('address')">Address<span class="sort-ic">▾</span></th>
           <th class="sortable" data-key="asset" tabindex="0" role="button" aria-sort="none" onclick="sortAcctListBy('asset')">Asset<span class="sort-ic">▾</span></th>
           <th class="sortable" data-key="os" tabindex="0" role="button" aria-sort="none" onclick="sortAcctListBy('os')">Amount<span class="sort-ic">▾</span></th>
+          <th class="tal sortable" data-key="npaDate" tabindex="0" role="button" aria-sort="none" onclick="sortAcctListBy('npaDate')">NPA Date<span class="sort-ic">▾</span></th>
         </tr></thead>
         <tbody id="acctListBody"></tbody>
       </table>
     </div>
   `;
-  initAcctListScroll(s.allAcctSorted);
+  initAcctListScroll(dashFilterAcctList(s.allAcctSorted));
+  const dashAddrInput = document.getElementById('dashAddressFilterInput');
+  if(dashAddrInput) dashAddrInput.onchange = () => { dashAddressFilter = dashAddrInput.value; initAcctListScroll(dashFilterAcctList(s.allAcctSorted)); };
+  const dashNpaFromInput = document.getElementById('dashNpaDateFromInput');
+  if(dashNpaFromInput) dashNpaFromInput.onchange = () => { dashNpaDateFrom = dashNpaFromInput.value; initAcctListScroll(dashFilterAcctList(s.allAcctSorted)); };
+  const dashNpaToInput = document.getElementById('dashNpaDateToInput');
+  if(dashNpaToInput) dashNpaToInput.onchange = () => { dashNpaDateTo = dashNpaToInput.value; initAcctListScroll(dashFilterAcctList(s.allAcctSorted)); };
 
   const heroOs = document.getElementById('heroTotalOs');
   if(heroOs) animateNumber(heroOs, 0, s.totalOS, fmtCr, 900);
@@ -6190,10 +6277,21 @@ window.savePnpaRemark = function(acctNo, inputEl){
 };
 
 let pnpaSlipTab = 'today';
+let pnpaAddressFilter = '';
 function setPnpaSlipTab(tab){ pnpaSlipTab = tab; renderPnpaSlipView(); }
 window.setPnpaSlipTab = setPnpaSlipTab;
 
+// PNPA rows carry no per-row address of their own -- resolved via the
+// shared addressForAcctNo() (see its own comment near normId()), which
+// looks at the main NPA book's own already-merged addresses first.
+function pnpaAddressFor(acctNo){
+  return addressForAcctNo(acctNo);
+}
 function renderPnpaSlipTable(list){
+  if(pnpaAddressFilter){
+    const q = pnpaAddressFilter.trim().toLowerCase();
+    list = list.filter(r=>pnpaAddressFor(r[PC.ACCT]).toLowerCase().includes(q));
+  }
   if(!list.length) return `<div class="empty-state"><p>No accounts slipped in this period.</p></div>`;
   const remarks = getPnpaRemarks();
   const rowsHtml = list.map(r=>{
@@ -6202,6 +6300,7 @@ function renderPnpaSlipTable(list){
     return `<tr>
       <td class="clickable" onclick="showQuickAcctDetailByAcct('pnpa','${acct}')">${acct}</td>
       <td class="tal clickable" onclick="showQuickAcctDetailByAcct('pnpa','${acct}')">${esc(r[PC.NAME])||'—'}</td>
+      <td class="tal">${esc(pnpaAddressFor(r[PC.ACCT]))||'—'}</td>
       <td>${fmtINR2(r[PC.OS])}</td>
       <td>${fmtINR2(r[PC.CADU])}</td>
       <td>${esc(r[PC.CUSTNPADATE])||'—'}</td>
@@ -6212,7 +6311,7 @@ function renderPnpaSlipTable(list){
     </tr>`;
   }).join('');
   return `<div class="dash-table-wrap"><table class="dash-table pnpa-slip-table">
-    <thead><tr><th>Account</th><th class="tal">Name</th><th>Balance</th><th>CADU</th><th>Cust NPA Date</th><th class="tal">Remark <span class="pnpa-remark-note">(saved on this device only)</span></th></tr></thead>
+    <thead><tr><th>Account</th><th class="tal">Name</th><th class="tal">Address</th><th>Balance</th><th>CADU</th><th>Cust NPA Date</th><th class="tal">Remark <span class="pnpa-remark-note">(saved on this device only)</span></th></tr></thead>
     <tbody>${rowsHtml}</tbody>
   </table></div>`;
 }
@@ -6276,9 +6375,14 @@ function renderPnpaSlipView(){
   el.innerHTML = `
     ${pnpaTodayHeroBlocks(agg.today.totals)}
     ${tabsHtml}
+    <div class="bank-filter-row">
+      <input type="text" id="pnpaAddressFilterInput" class="dash-select" placeholder="Filter by Address…" value="${esc(pnpaAddressFilter)}" style="max-width:220px">
+    </div>
     ${pnpaSlipSummaryChips(active.totals)}
     ${renderPnpaSlipTable(active.list)}
   `;
+  const addrInput = document.getElementById('pnpaAddressFilterInput');
+  if(addrInput) addrInput.onchange = () => { pnpaAddressFilter = addrInput.value; renderPnpaSlipView(); };
 }
 window.renderPnpaSlipView = renderPnpaSlipView;
 
@@ -6357,7 +6461,8 @@ let kccovDateMode = 'month';
 let kccovMonthFilter = '';
 let kccovDateFrom = '';
 let kccovDateTo = '';
-let kccovView = 'summary'; // 'summary' | 'calendar' | 'fymonth' | 'branchreport' | 'allbranches'
+let kccovAddressFilter = '';
+let kccovView = 'summary'; // 'summary' | 'calendar' | 'fymonth'
 // Datewise Calendar's own column sort -- {key:'sol'|'branch'|'total'|<date
 // string>, dir:'asc'|'desc'}. Starts null so renderKccOverdueCalendar()
 // can tell "never sorted yet" apart from "user explicitly re-sorted" and
@@ -6451,10 +6556,20 @@ function renderKccOverdue(){
     });
 }
 
+// KCC Overdue's own rows carry no per-row address of their own -- resolved
+// via the shared addressForAcctNo() (see its own comment near normId()),
+// which looks at the main NPA book's own already-merged addresses first.
+function kccovAddressFor(acctNo){
+  return addressForAcctNo(acctNo);
+}
 function kccovFilteredRows(d){
   let rows = d.rows;
   if(kccovBranchFilter) rows = rows.filter(r=>r[KC.BRANCH]===kccovBranchFilter);
   if(kccovFyFilter) rows = rows.filter(r=>r[KC.FY]===kccovFyFilter);
+  if(kccovAddressFilter){
+    const q = kccovAddressFilter.trim().toLowerCase();
+    rows = rows.filter(r=>kccovAddressFor(r[KC.ACCT]).toLowerCase().includes(q));
+  }
   if(kccovDateMode==='month' && kccovMonthFilter){
     const [y,m] = kccovMonthFilter.split('-').map(Number);
     rows = rows.filter(r=>{ const dt = toDate(r[KC.CUSTNPADATE]); return dt && dt.getFullYear()===y && (dt.getMonth()+1)===m; });
@@ -6471,18 +6586,6 @@ function kccovFilteredRows(d){
   }
   return rows;
 }
-function kccovBranchAgg(rows, bucket){
-  const map = new Map();
-  for(const r of rows){
-    if(kccOverdueBucketOf(r[KC.SCHEME])!==bucket) continue;
-    const key = r[KC.BRANCH];
-    let e = map.get(key);
-    if(!e){ e = {branch:r[KC.BRANCH], count:0, os:0}; map.set(key,e); }
-    e.count++; e.os += r[KC.OS];
-  }
-  return [...map.values()].sort((a,b)=>b.os-a.os);
-}
-
 function renderKccOverdueBody(){
   const el = document.getElementById('kccOverdueArea');
   const d = KCC_OVERDUE_DATA;
@@ -6529,6 +6632,7 @@ function renderKccOverdueBody(){
     </div>
     <div class="bank-filter-row">
       <select id="kccovFyFilterSelect" class="dash-select">${fyFilterOptions}</select>
+      <input type="text" id="kccovAddressFilterInput" class="dash-select" placeholder="Filter by Address…" value="${esc(kccovAddressFilter)}" style="max-width:220px">
     </div>
     ${dateModeRow}
     <div class="bank-filter-row">${dateInputsRow}</div>`;
@@ -6565,23 +6669,26 @@ function renderKccOverdueBody(){
     }).join('')}</div>`;
   }
 
-  // 5 view modes in one row: the original 2 (Branch Summary/Calendar,
-  // scoped to one scheme via the hero row above) plus 3 new ones (F.Y./
-  // Month Summary/Branch Report/All Branches Overview, always showing
-  // KCC/KCC-AH/OD-023 side by side) -- a thin .bank-tab-sep divider marks
-  // the boundary between the two groups without a second tab row, same
-  // flex-wrap this row already relies on for narrow screens.
+  // 3 view modes in one row: Branch Summary/Calendar (scoped to one scheme
+  // via the hero row above) plus F.Y./Month Summary (always showing KCC/
+  // KCC-AH/OD-023 side by side) -- a thin .bank-tab-sep divider marks the
+  // boundary between the two groups without a second tab row, same
+  // flex-wrap this row already relies on for narrow screens. Recovery
+  // Dashboard (branch portal): "Branch Report" and "All Branches Overview"
+  // were dropped entirely (not just hidden) -- both exist on the main
+  // npadashboard site to let an HO user pick/compare branches, which is
+  // meaningless here since this portal is permanently locked to one
+  // branch already (Alok, 2026-09-25: "all branch overview ki need hai
+  // kya... branch report dono ko hata do").
   const viewToggleRow = `<div class="bank-tab-row" style="margin-top:18px">
     <button type="button" class="bank-tab-btn${kccovView==='summary'?' active':''}" onclick="setKccovView('summary')">Branch Summary</button>
     <button type="button" class="bank-tab-btn${kccovView==='calendar'?' active':''}" onclick="setKccovView('calendar')">Datewise Calendar</button>
     <span class="bank-tab-sep" aria-hidden="true"></span>
     <button type="button" class="bank-tab-btn${kccovView==='fymonth'?' active':''}" onclick="setKccovView('fymonth')">F.Y./Month Summary</button>
-    <button type="button" class="bank-tab-btn${kccovView==='branchreport'?' active':''}" onclick="setKccovView('branchreport')">Branch Report</button>
-    <button type="button" class="bank-tab-btn${kccovView==='allbranches'?' active':''}" onclick="setKccovView('allbranches')">All Branches Overview</button>
   </div>`;
 
-  const isBifurcationView = kccovView==='fymonth' || kccovView==='branchreport' || kccovView==='allbranches';
-  const showPrintPdf = kccovView==='fymonth' || kccovView==='allbranches';
+  const isBifurcationView = kccovView==='fymonth';
+  const showPrintPdf = kccovView==='fymonth';
   const actionButtons = kccovView==='summary'
     ? `<button type="button" class="export-xl-btn" onclick="exportKccOverdueSummary()">${EXPORT_XL_ICON} Export to Excel</button>`
     : isBifurcationView
@@ -6605,6 +6712,8 @@ function renderKccOverdueBody(){
   if(branchSel) branchSel.onchange = () => { kccovBranchFilter = branchSel.value; renderKccOverdueBody(); };
   const fySel = document.getElementById('kccovFyFilterSelect');
   if(fySel) fySel.onchange = () => { kccovFyFilter = fySel.value; renderKccOverdueBody(); };
+  const addrInput = document.getElementById('kccovAddressFilterInput');
+  if(addrInput) addrInput.onchange = () => { kccovAddressFilter = addrInput.value; renderKccOverdueBody(); };
   const monthInput = document.getElementById('kccovMonthInput');
   if(monthInput) monthInput.onchange = () => { kccovMonthFilter = monthInput.value; renderKccOverdueBody(); };
   const fromInput = document.getElementById('kccovDateFromInput');
@@ -6614,46 +6723,58 @@ function renderKccOverdueBody(){
 
   if(kccovView==='calendar') renderKccOverdueCalendar(filteredRows);
   else if(kccovView==='fymonth') renderKccOverdueFyMonth(filteredRows);
-  else if(kccovView==='branchreport') renderKccOverdueBranchReport(filteredRows);
-  else if(kccovView==='allbranches') renderKccOverdueAllBranches(filteredRows);
   else renderKccOverdueBranchTable(filteredRows);
 }
 
 let kccovLastExport = null;
+// Recovery Dashboard (branch portal): this used to be a branch-wise
+// ranking table (Rank/Branch/Accounts/Total O/S) -- but with the whole
+// tab already locked to one branch, that table always had exactly one
+// row, which just restated the hero cards above it. Alok, 2026-09-25:
+// "branch summary k blocks hain to niche summary table ki need nahi hai
+// yahan account wise list de do with filtered" -- the hero blocks already
+// are the summary, so this now lists the underlying accounts directly
+// (scoped to whichever scheme tab is active), with Address in place of
+// the no-longer-meaningful Branch column and its own Address filter.
 function renderKccOverdueBranchTable(filteredRows){
   const wrap = document.getElementById('kccovBranchTableCard');
   const labelEl = document.getElementById('kccovTableLabel');
   if(!wrap) return;
   const activeScheme = KCC_OVERDUE_SCHEMES.find(s=>s.key===kccovSchemeTab);
-  const branchAgg = kccovBranchAgg(filteredRows, kccovSchemeTab);
+  const list = filteredRows.filter(r=>kccOverdueBucketOf(r[KC.SCHEME])===kccovSchemeTab).map(r=>({
+    acctNo:r[KC.ACCT], name:r[KC.NAME], address:kccovAddressFor(r[KC.ACCT]), os:r[KC.OS], cadu:r[KC.CADU], limit:r[KC.LIMIT],
+    custNpaDate:r[KC.CUSTNPADATE], fy:r[KC.FY], category:r[KC.CATEGORY], sma:r[KC.SMA],
+  })).sort((a,b)=>b.os-a.os);
   const scopeLabel = kccovBranchFilter ? esc(kccovBranchFilter) : 'Regional Office (all branches)';
-  kccovLastExport = { branchAgg, schemeLabel: activeScheme.label, schemeCode: activeScheme.code, scopeLabel };
-  if(labelEl) labelEl.innerHTML = `${esc(activeScheme.label)} — Branch-wise Summary, highest O/S first<span class="chart-sub">Scheme ${esc(activeScheme.code)} · ${scopeLabel} · ${branchAgg.length.toLocaleString('en-IN')} branch(es) shown · tap a branch to see the account list</span>`;
-  const rowsHtml = branchAgg.map((r,i)=>`<tr class="clickable" onclick="kccovShowBranchAccounts('${kccovSchemeTab}','${esc(r.branch)}')">
-    <td><span class="dash-rank">${i+1}</span></td>
-    <td class="tal">${esc(r.branch)}</td>
-    <td>${r.count.toLocaleString('en-IN')}</td>
-    <td>${fmtCr(r.os)}</td>
+  kccovLastExport = { list, schemeLabel: activeScheme.label, schemeCode: activeScheme.code, scopeLabel };
+  if(labelEl) labelEl.innerHTML = `${esc(activeScheme.label)} — Account-wise list, highest O/S first<span class="chart-sub">Scheme ${esc(activeScheme.code)} · ${scopeLabel} · ${list.length.toLocaleString('en-IN')} account(s) shown · tap an account for details</span>`;
+  const rowsHtml = list.map((r,i)=>`<tr class="clickable" onclick="showQuickAcctDetailByAcct('kccov','${esc(r.acctNo)}')">
+    <td><span class="dash-rank">${i+1}</span>${esc(r.acctNo)}</td>
+    <td class="tal">${esc(r.name)||'—'}</td>
+    <td class="tal">${esc(r.address)||'—'}</td>
+    <td>${fmtINR2(r.os)}</td>
+    <td>${fmtINR2(r.cadu)}</td>
+    <td class="tal">${esc(r.custNpaDate)||'—'}</td>
   </tr>`).join('');
   wrap.innerHTML = `<div class="dash-table-wrap acct-list-scroll">
     <table class="dash-table">
-      <thead><tr><th class="tal">Rank</th><th class="tal">Branch</th><th>Accounts</th><th>Total O/S</th></tr></thead>
-      <tbody>${rowsHtml || emptyStateRowHtml(4, 'No branches match this filter')}</tbody>
+      <thead><tr><th class="tal">Account</th><th class="tal">Customer</th><th class="tal">Address</th><th>O/S</th><th>CADU</th><th class="tal">Cust NPA Date</th></tr></thead>
+      <tbody>${rowsHtml || emptyStateRowHtml(6, 'No accounts match this filter')}</tbody>
     </table>
   </div>`;
 }
-/* Exports exactly the branch-summary table currently on screen (same
-   scheme tab / branch / F.Y. / date filters), not the raw account-level
-   rows -- kept WYSIWYG so the file never surprises whoever downloads it
-   with a different granularity than what they were looking at. */
+/* Exports exactly the account list currently on screen (same scheme tab /
+   branch / F.Y. / address / date filters) -- kept WYSIWYG so the file
+   never surprises whoever downloads it with a different set of rows than
+   what they were looking at. */
 function exportKccOverdueSummary(){
   const x = kccovLastExport;
-  if(!x || !x.branchAgg.length) return;
-  const rows = x.branchAgg.map((r,i)=>[i+1, r.branch, r.count, r.os]);
+  if(!x || !x.list.length) return;
+  const rows = x.list.map(r=>[r.acctNo, r.name, r.address, r.os, r.cadu, r.custNpaDate]);
   exportRowsToExcel(
     `KCC_Overdue_${x.schemeCode}_${dateToInputValue(new Date())}.xlsx`, 'KCC Overdue Summary',
-    ['Rank','Branch','Accounts','Total O/S'], rows,
-    [null,null,null,XL_INR_FMT]
+    ['Account No','Customer','Address','O/S','CADU','Cust NPA Date'], rows,
+    [null,null,null,XL_INR_FMT,XL_INR_FMT,null]
   );
   showToast(`✓ ${x.branchAgg.length} branch row${x.branchAgg.length>1?'s':''} exported`);
 }
@@ -6729,56 +6850,13 @@ function kccovWriteBifurcationSheet(ws, title, rows){
   });
   if(!fyKeys.length){ ws.getCell(r,1).value = 'No qualifying rows.'; }
 }
-function kccovWriteFlatBranchSheet(ws, rows){
-  ws.getColumn(1).width = 10; ws.getColumn(2).width = 26;
-  for(let c=3;c<=14;c++) ws.getColumn(c).width = 15;
-  let r = 1;
-  ws.mergeCells(r,1,r,14);
-  ws.getCell(r,1).value = 'All Branches Overview'; ws.getCell(r,1).font = {bold:true, size:14};
-  r += 2;
-  const headerRow1 = r;
-  ws.mergeCells(r,1,r+1,1); ws.getCell(r,1).value = 'Sol'; ws.getCell(r,1).font = {bold:true};
-  ws.mergeCells(r,2,r+1,2); ws.getCell(r,2).value = 'Branch'; ws.getCell(r,2).font = {bold:true};
-  KCCOV_BIFURCATION_GROUPS.forEach((gd,i)=>{
-    const col = 3+i*2;
-    ws.mergeCells(r,col,r,col+1);
-    ws.getCell(r,col).value = gd.label; ws.getCell(r,col).font = {bold:true};
-    ws.getCell(r+1,col).value = 'A/C Count'; ws.getCell(r+1,col).font = {bold:true};
-    ws.getCell(r+1,col+1).value = 'Amount (₹ Lakh)'; ws.getCell(r+1,col+1).font = {bold:true};
-  });
-  for(let cc=1; cc<=14; cc++){
-    ws.getCell(r,cc).border = kccovThinBorder(); ws.getCell(r+1,cc).border = kccovThinBorder();
-    ws.getCell(r,cc).fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFDCEEE8'}};
-    ws.getCell(r+1,cc).fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFDCEEE8'}};
-  }
-  r += 2;
-  const byBranch = kccovAggregateBranches(rows), branchKeys = kccovSortBranchKeys(byBranch, Array.from(byBranch.keys()));
-  const grand = kccovEmptyGroupTotals();
-  branchKeys.forEach(bk=>{
-    const rec = byBranch.get(bk);
-    kccovAddGroupInto(grand, rec.g);
-    ws.getCell(r,1).value = rec.sol||''; ws.getCell(r,2).value = rec.branch;
-    KCCOV_BIFURCATION_GROUPS.forEach((gd,i)=>{
-      const col = 3+i*2, b = rec.g[gd.key];
-      ws.getCell(r,col).value = b.cnt; ws.getCell(r,col).numFmt = '0';
-      ws.getCell(r,col+1).value = kccovRound2(b.amt/100000); ws.getCell(r,col+1).numFmt = '0.00';
-    });
-    r += 1;
-  });
-  ws.mergeCells(r,1,r,2); ws.getCell(r,1).value = 'Grand Total'; ws.getCell(r,1).font = {bold:true};
-  KCCOV_BIFURCATION_GROUPS.forEach((gd,i)=>{
-    const col = 3+i*2, b = grand[gd.key];
-    ws.getCell(r,col).value = b.cnt; ws.getCell(r,col).font = {bold:true};
-    ws.getCell(r,col+1).value = kccovRound2(b.amt/100000); ws.getCell(r,col+1).font = {bold:true};
-  });
-  for(let cf=1; cf<=14; cf++){ ws.getCell(r,cf).border = {top:{style:'thin'}}; ws.getCell(r,cf).fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFF3E7CE'}}; }
-  ws.views = [{ state:'frozen', ySplit: headerRow1+1 }];
-}
-function kccovColLetter(n){
-  let s = '';
-  while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26); }
-  return s;
-}
+// Recovery Dashboard (branch portal): the "Branch Report" (per-branch
+// dropdown drill-down) and "All Branches" (one row per branch) sheets
+// were dropped along with their on-screen views -- both exist on the
+// main npadashboard site to compare across branches, meaningless here
+// since every row already belongs to the one locked branch (same reason
+// as the on-screen tab removal above). This raw Data sheet is kept as a
+// plain reference dump.
 function kccovWriteDataSheet(ws, rows){
   ws.addRow(['Sol','Branch','Account No','Balance Amount','Scheme','Cust NPA Date','F.Y.','Month Label']);
   ws.getRow(1).font = {bold:true};
@@ -6789,90 +6867,7 @@ function kccovWriteDataSheet(ws, rows){
   });
   ws.getColumn(6).numFmt = 'dd-mm-yyyy';
   for(let c=1;c<=8;c++) ws.getColumn(c).width = (c===2?22:(c===3?16:14));
-  const branchNames = Array.from(new Set(rows.map(r=>r.branch))).sort();
-  ws.getCell(1,10).value = 'Branch List (for the dropdown)'; ws.getCell(1,10).font = {bold:true};
-  branchNames.forEach((name, i)=>{ ws.getCell(i+2, 10).value = name; });
-  ws.getColumn(10).width = 24;
   ws.views = [{state:'frozen', ySplit:1}];
-  return branchNames;
-}
-function kccovBranchReportFormula(kind, fy, monthLabel, groupLabel, dropdownAddr){
-  const critBranch = 'Data!$B:$B,'+dropdownAddr;
-  const critFy = 'Data!$G:$G,"'+String(fy).replace(/"/g,'""')+'"';
-  const critMonth = 'Data!$H:$H,"'+String(monthLabel).replace(/"/g,'""')+'"';
-  const critGroup = groupLabel ? ',Data!$E:$E,"'+groupLabel+'"' : '';
-  if(kind==='cnt') return 'COUNTIFS('+critBranch+','+critFy+','+critMonth+critGroup+')';
-  if(kind==='amt') return 'SUMIFS(Data!$D:$D,'+critBranch+','+critFy+','+critMonth+critGroup+')/100000';
-  if(kind==='cnt5') return 'COUNTIFS('+critBranch+','+critFy+','+critMonth+',Data!$D:$D,">=500000")';
-  if(kind==='amt5') return 'SUMIFS(Data!$D:$D,'+critBranch+','+critFy+','+critMonth+',Data!$D:$D,">=500000")/100000';
-  if(kind==='cnt10') return 'COUNTIFS('+critBranch+','+critFy+','+critMonth+',Data!$D:$D,">=1000000")';
-  if(kind==='amt10') return 'SUMIFS(Data!$D:$D,'+critBranch+','+critFy+','+critMonth+',Data!$D:$D,">=1000000")/100000';
-}
-// Built dynamically off KCC_OVERDUE_SCHEMES (the same source of truth
-// kccovWriteDataSheet's own group-label column derives from), so these
-// formula criteria strings and the Data sheet's own written label text
-// can never drift apart from each other -- no separate manual mapping
-// to get backwards.
-const KCCOV_BRANCH_REPORT_SPECS = [
-  ...KCC_OVERDUE_SCHEMES.flatMap(s=>[{kind:'cnt', group:s.label}, {kind:'amt', group:s.label}]),
-  {kind:'cnt', group:null}, {kind:'amt', group:null},
-  {kind:'cnt5'}, {kind:'amt5'}, {kind:'cnt10'}, {kind:'amt10'},
-];
-function kccovWriteBranchReportDataRow(ws, r, label, fy, monthLabel, dropdownAddr){
-  ws.getCell(r,1).value = label;
-  KCCOV_BRANCH_REPORT_SPECS.forEach((spec, i)=>{
-    const col = 2+i;
-    const cell = ws.getCell(r, col);
-    cell.value = {formula: kccovBranchReportFormula(spec.kind, fy, monthLabel, spec.group, dropdownAddr)};
-    cell.numFmt = (i%2===0) ? '0' : '0.00';
-  });
-  return r+1;
-}
-function kccovWriteBranchReportTotalRow(ws, r, label, startRow, endRow){
-  ws.getCell(r,1).value = label; ws.getCell(r,1).font = {bold:true};
-  for(let col=2; col<=13; col++){
-    const letter = kccovColLetter(col);
-    const cell = ws.getCell(r, col);
-    cell.value = {formula: 'SUM('+letter+startRow+':'+letter+endRow+')'};
-    cell.font = {bold:true}; cell.numFmt = ((col-2)%2===0) ? '0' : '0.00';
-    cell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFF3E7CE'}};
-    cell.border = {top:{style:'thin'}};
-  }
-  return r+1;
-}
-function kccovWriteBranchReportSheet(ws, rows, defaultBranch, branchNames, branchCount){
-  ws.getColumn(1).width = 16;
-  for(let c=2;c<=13;c++) ws.getColumn(c).width = 15;
-  let r = 1;
-  ws.mergeCells(r,1,r,13);
-  ws.getCell(r,1).value = 'Branch Report'; ws.getCell(r,1).font = {bold:true, size:14};
-  r += 1;
-  ws.getCell(r,1).value = 'Select Branch:'; ws.getCell(r,1).font = {bold:true};
-  const dropdownAddr = '$'+kccovColLetter(2)+'$'+r;
-  ws.mergeCells(r,2,r,4);
-  const ddCell = ws.getCell(r,2);
-  ddCell.value = branchNames.indexOf(defaultBranch)>=0 ? defaultBranch : (branchNames[0]||'');
-  ddCell.font = {bold:true, size:12, color:{argb:'FF0E6B57'}};
-  ddCell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFDCEEE8'}};
-  ddCell.border = kccovThinBorder();
-  ddCell.dataValidation = {
-    type: 'list', allowBlank: false,
-    formulae: ['Data!$J$2:$J$'+(branchCount+1)],
-    showErrorMessage: true, errorTitle: 'Invalid branch', error: 'Pick a branch from the dropdown list.'
-  };
-  r += 2;
-  const byFy = kccovAggregateFyMonth(rows);
-  const fyKeys = kccovSortFyKeys(Array.from(byFy.keys()));
-  fyKeys.forEach((fy, fi)=>{
-    r = kccovWriteFyBand(ws, r, fy, KCCOV_FY_PALETTE_ARGB[fi % KCCOV_FY_PALETTE_ARGB.length]);
-    r = kccovWriteTwoRowHeader(ws, r, KCCOV_FY_PALETTE_SOFT_ARGB[fi % KCCOV_FY_PALETTE_SOFT_ARGB.length]);
-    const monthMap = byFy.get(fy), monthKeys = kccovSortMonthKeys(Array.from(monthMap.keys()));
-    const sectionStart = r;
-    monthKeys.forEach(mk=>{ r = kccovWriteBranchReportDataRow(ws, r, monthMap.get(mk).label, fy, monthMap.get(mk).label, dropdownAddr); });
-    r = kccovWriteBranchReportTotalRow(ws, r, 'F.Y. '+fy+' TOTAL', sectionStart, r-1);
-    r += 1;
-  });
-  if(!fyKeys.length){ ws.getCell(r,1).value = 'No qualifying rows.'; }
 }
 async function exportKccOverdueBifurcation(){
   await ensureExcelJS();
@@ -6881,11 +6876,7 @@ async function exportKccOverdueBifurcation(){
   const wb = new ExcelJS.Workbook();
   wb.calcProperties = { fullCalcOnLoad: true };
   kccovWriteBifurcationSheet(wb.addWorksheet('Report'), 'KCC Overdue — F.Y./Month Bifurcation', mapped);
-  const wsData = wb.addWorksheet('Data');
-  const branchNames = kccovWriteDataSheet(wsData, mapped);
-  const defaultBranch = kccovBranchFilter || branchNames[0] || '';
-  kccovWriteBranchReportSheet(wb.addWorksheet('Branch Report'), mapped, defaultBranch, branchNames, branchNames.length);
-  kccovWriteFlatBranchSheet(wb.addWorksheet('All Branches'), mapped);
+  kccovWriteDataSheet(wb.addWorksheet('Data'), mapped);
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const url = URL.createObjectURL(blob);
@@ -7119,6 +7110,7 @@ window.sortKccovCal = sortKccovCal;
 const KCCOV_ACCT_LIST_HEAD = '<tr>'
   +'<th class="sortable" data-key="acctNo" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'acctNo\')">Account<span class="sort-ic">▾</span></th>'
   +'<th class="tal sortable" data-key="name" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'name\')">Customer<span class="sort-ic">▾</span></th>'
+  +'<th class="tal sortable" data-key="address" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'address\')">Address<span class="sort-ic">▾</span></th>'
   +'<th class="sortable" data-key="os" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'os\')">O/S<span class="sort-ic">▾</span></th>'
   +'<th class="sortable" data-key="cadu" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'cadu\')">CADU<span class="sort-ic">▾</span></th>'
   +'<th class="sortable" data-key="limit" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'limit\')">Limit<span class="sort-ic">▾</span></th>'
@@ -7128,10 +7120,11 @@ const KCCOV_ACCT_LIST_HEAD = '<tr>'
   +'<th class="tal sortable" data-key="sma" tabindex="0" role="button" aria-sort="none" onclick="sortListModalBy(\'sma\')">SMA<span class="sort-ic">▾</span></th>'
   +'</tr>';
 function kccovAcctRows(list){
-  if(!list.length) return emptyStateRowHtml(9, 'No accounts');
+  if(!list.length) return emptyStateRowHtml(10, 'No accounts');
   return list.map(a=>`<tr class="clickable" onclick="showQuickAcctDetailByAcct('kccov','${esc(a.acctNo)}')">
     <td>${esc(a.acctNo)}</td>
     <td class="tal">${esc(a.name)||'—'}</td>
+    <td class="tal">${esc(a.address)||'—'}</td>
     <td>${fmtINR2(a.os)}</td>
     <td>${fmtINR2(a.cadu)}</td>
     <td>${fmtINR2(a.limit)}</td>
@@ -7147,7 +7140,7 @@ function kccovShowBranchAccounts(bucket, branch, custNpaDate){
   const filteredRows = kccovFilteredRows(KCC_OVERDUE_DATA);
   let rows = filteredRows.filter(r=>kccOverdueBucketOf(r[KC.SCHEME])===bucket && r[KC.BRANCH]===branch);
   if(custNpaDate) rows = rows.filter(r=>r[KC.CUSTNPADATE]===custNpaDate);
-  const list = rows.map(r=>({ acctNo:r[KC.ACCT], name:r[KC.NAME], os:r[KC.OS], cadu:r[KC.CADU], limit:r[KC.LIMIT], custNpaDate:r[KC.CUSTNPADATE], fy:r[KC.FY], category:r[KC.CATEGORY], sma:r[KC.SMA] }));
+  const list = rows.map(r=>({ acctNo:r[KC.ACCT], name:r[KC.NAME], address:kccovAddressFor(r[KC.ACCT]), os:r[KC.OS], cadu:r[KC.CADU], limit:r[KC.LIMIT], custNpaDate:r[KC.CUSTNPADATE], fy:r[KC.FY], category:r[KC.CATEGORY], sma:r[KC.SMA] }));
   const sLabel = (KCC_OVERDUE_SCHEMES.find(s=>s.key===bucket)||{}).label || bucket;
   const subLabel = custNpaDate ? `Hathras · Cust NPA Date ${custNpaDate} · ${list.length.toLocaleString('en-IN')} account(s)` : `Hathras · ${list.length.toLocaleString('en-IN')} account(s)`;
   showKccovListModal(`${branch} — ${sLabel}`, subLabel, list);
@@ -7227,28 +7220,12 @@ function kccovAggregateFyMonth(rows){
   });
   return byFy;
 }
-function kccovAggregateBranches(rows){
-  const byBranch = new Map();
-  rows.forEach(r=>{
-    if(!byBranch.has(r.branch)) byBranch.set(r.branch, { sol:r.sol, branch:r.branch, g:kccovEmptyGroupTotals() });
-    kccovAddRowToGroup(byBranch.get(r.branch).g, r);
-  });
-  return byBranch;
-}
 // F.Y. labels are "MAR-YY" (fiscal year ending March 20YY) -- sorted
 // chronologically off the trailing 2-digit year; 'Unspecified' (blank F.Y.
 // rows) always sorts last rather than first.
 function kccovFyYear(fy){ if(fy==='Unspecified') return Infinity; const m = /-(\d{2})$/.exec(fy); return m ? 2000 + +m[1] : 0; }
 function kccovSortFyKeys(keys){ return keys.slice().sort((a,b)=>{ const ya=kccovFyYear(a), yb=kccovFyYear(b); return ya!==yb ? ya-yb : String(a).localeCompare(String(b)); }); }
 function kccovSortMonthKeys(keys){ return keys.slice().sort((a,b)=>a-b); }
-function kccovBranchSortKey(rec){ const n = parseInt(rec.sol,10); return isNaN(n) ? null : n; }
-function kccovSortBranchKeys(byBranch, keys){
-  return keys.slice().sort((a,b)=>{
-    const ra=byBranch.get(a), rb=byBranch.get(b), sa=kccovBranchSortKey(ra), sb=kccovBranchSortKey(rb);
-    if(sa!=null && sb!=null) return sa-sb;
-    return String(ra.branch).localeCompare(String(rb.branch));
-  });
-}
 
 /* ---------- drill-down: reuses the existing showKccovListModal/kccovAcctRows infra
    (js/app.js above), filtering the RAW KC-indexed toolbar-filtered rows -- not the
@@ -7260,7 +7237,7 @@ function kccovFilterByBucketKey(scoped, bucketKey){
   return scoped.filter(r=>kccOverdueBucketOf(r[KC.SCHEME])===bucketKey); // kcc/kccah/od023
 }
 function kccovRowsToModalList(rows){
-  return rows.map(r=>({ acctNo:r[KC.ACCT], name:r[KC.NAME], os:r[KC.OS], cadu:r[KC.CADU], limit:r[KC.LIMIT], custNpaDate:r[KC.CUSTNPADATE], fy:r[KC.FY], category:r[KC.CATEGORY], sma:r[KC.SMA] }));
+  return rows.map(r=>({ acctNo:r[KC.ACCT], name:r[KC.NAME], address:kccovAddressFor(r[KC.ACCT]), os:r[KC.OS], cadu:r[KC.CADU], limit:r[KC.LIMIT], custNpaDate:r[KC.CUSTNPADATE], fy:r[KC.FY], category:r[KC.CATEGORY], sma:r[KC.SMA] }));
 }
 function kccovShowBifurcationAccounts(fy, monthKey, monthLabel, bucketKey){
   const base = kccovFilteredRows(KCC_OVERDUE_DATA).filter(r=>{
@@ -7273,15 +7250,8 @@ function kccovShowBifurcationAccounts(fy, monthKey, monthLabel, bucketKey){
   showKccovListModal(`F.Y. ${fy} · ${monthLabel} · ${groupLabel}`, `${list.length.toLocaleString('en-IN')} account(s)`, list);
 }
 window.kccovShowBifurcationAccounts = kccovShowBifurcationAccounts;
-function kccovShowBranchBucketAccounts(branch, bucketKey){
-  const base = kccovFilteredRows(KCC_OVERDUE_DATA).filter(r=>r[KC.BRANCH]===branch);
-  const list = kccovRowsToModalList(kccovFilterByBucketKey(base, bucketKey));
-  const groupLabel = (KCCOV_BIFURCATION_GROUPS.find(g=>g.key===bucketKey)||{}).label || bucketKey;
-  showKccovListModal(`${branch} — ${groupLabel}`, `${list.length.toLocaleString('en-IN')} account(s)`, list);
-}
-window.kccovShowBranchBucketAccounts = kccovShowBranchBucketAccounts;
 
-/* ---------- rendering: F.Y./Month bifurcation table (reused for Branch Report) ----------
+/* ---------- rendering: F.Y./Month bifurcation table ----------
    One real <table> PER F.Y. section (each with its own <thead>/<tbody>), not one
    giant flat table -- lets both native print pagination and the PDF export
    (below) repeat each section's own band+header wherever it breaks across a
@@ -7335,40 +7305,8 @@ function kccovRenderBifurcationTable(rows){
   html += '</div>';
   return html;
 }
-function kccovRenderAllBranchesTable(rows){
-  const byBranch = kccovAggregateBranches(rows);
-  const branchKeys = kccovSortBranchKeys(byBranch, Array.from(byBranch.keys()));
-  if(!branchKeys.length) return '<div class="empty-state"><p>No qualifying rows.</p></div>';
-  let html = '<div class="bifurcation-scroll"><table class="bifurcation-table all-branches-table"><thead>';
-  html += `<tr><th rowspan="2" class="tal hdr-row1">Sol</th><th rowspan="2" class="tal hdr-row1">Branch</th>${KCCOV_BIFURCATION_GROUPS.map(gd=>`<th class="hdr-row1" colspan="2">${esc(gd.label)}</th>`).join('')}</tr>`;
-  html += `<tr>${KCCOV_BIFURCATION_GROUPS.map(()=>`<th class="hdr-row2">A/C Count</th><th class="hdr-row2">Amount (₹ Lakh)</th>`).join('')}</tr>`;
-  html += '</thead><tbody>';
-  const grand = kccovEmptyGroupTotals();
-  branchKeys.forEach(bk=>{
-    const rec = byBranch.get(bk);
-    kccovAddGroupInto(grand, rec.g);
-    html += `<tr class="data-row"><td class="tal">${esc(rec.sol||'—')}</td><td class="tal">${esc(rec.branch||'—')}</td>`;
-    KCCOV_BIFURCATION_GROUPS.forEach(gd=>{
-      const b = rec.g[gd.key];
-      html += `<td class="num clickable" onclick="kccovShowBranchBucketAccounts('${esc(bk)}','${gd.key}')">${kccovFmtCnt(b.cnt)}</td>`;
-      html += `<td class="num clickable" onclick="kccovShowBranchBucketAccounts('${esc(bk)}','${gd.key}')">${kccovFmtLakh(b.amt)}</td>`;
-    });
-    html += '</tr>';
-  });
-  // Recovery Dashboard (branch portal): locked to one branch throughout,
-  // so this table always has exactly 1 row -- a "Grand Total" identical to
-  // it is the same redundant-row problem as kccovBuildFySectionTable's own
-  // F.Y. TOTAL row above; same fix, skip it when there's nothing to sum.
-  if(branchKeys.length > 1){
-    html += `<tr class="fy-total-row"><td colspan="2" class="tal">Grand Total</td>`;
-    KCCOV_BIFURCATION_GROUPS.forEach(gd=>{ const b = grand[gd.key]; html += `<td class="num">${kccovFmtCnt(b.cnt)}</td><td class="num">${kccovFmtLakh(b.amt)}</td>`; });
-    html += '</tr>';
-  }
-  html += '</tbody></table></div>';
-  return html;
-}
 
-/* ---------- 3 new dispatch targets, called from renderKccOverdueBody() ---------- */
+/* ---------- dispatch target, called from renderKccOverdueBody() ---------- */
 function renderKccOverdueFyMonth(filteredRows){
   const wrap = document.getElementById('kccovBranchTableCard');
   const labelEl = document.getElementById('kccovTableLabel');
@@ -7377,28 +7315,6 @@ function renderKccOverdueFyMonth(filteredRows){
   const scopeLabel = kccovBranchFilter ? esc(kccovBranchFilter) : 'Regional Office (all branches)';
   if(labelEl) labelEl.innerHTML = `F.Y./Month Bifurcation — KCC / KCC-AH / OD-023 side by side<span class="chart-sub">${scopeLabel} · tap any figure to see the account list${skippedNoDate?` · ${skippedNoDate} account(s) excluded (no Cust NPA Date)`:''}</span>`;
   wrap.innerHTML = kccovRenderBifurcationTable(mapped);
-}
-function renderKccOverdueBranchReport(filteredRows){
-  const wrap = document.getElementById('kccovBranchTableCard');
-  const labelEl = document.getElementById('kccovTableLabel');
-  if(!wrap) return;
-  if(!kccovBranchFilter){
-    if(labelEl) labelEl.innerHTML = `Branch Report<span class="chart-sub">F.Y./Month bifurcation for one branch at a time — pick a branch above</span>`;
-    wrap.innerHTML = `<div class="empty-state"><p>Pick a branch from the Branch filter above to see its F.Y./Month bifurcation.</p></div>`;
-    return;
-  }
-  const { rows: mapped, skippedNoDate } = kccovMapBifurcationRows(filteredRows);
-  if(labelEl) labelEl.innerHTML = `Branch Report — ${esc(kccovBranchFilter)}<span class="chart-sub">tap any figure to see the account list${skippedNoDate?` · ${skippedNoDate} account(s) excluded (no Cust NPA Date)`:''}</span>`;
-  wrap.innerHTML = kccovRenderBifurcationTable(mapped);
-}
-function renderKccOverdueAllBranches(filteredRows){
-  const wrap = document.getElementById('kccovBranchTableCard');
-  const labelEl = document.getElementById('kccovTableLabel');
-  if(!wrap) return;
-  const { rows: mapped, skippedNoDate } = kccovMapBifurcationRows(filteredRows);
-  const scopeLabel = kccovBranchFilter ? esc(kccovBranchFilter) : 'all branches';
-  if(labelEl) labelEl.innerHTML = `All Branches Overview<span class="chart-sub">${scopeLabel} · tap any figure to see the account list${skippedNoDate?` · ${skippedNoDate} account(s) excluded (no Cust NPA Date)`:''}</span>`;
-  wrap.innerHTML = kccovRenderAllBranchesTable(mapped);
 }
 
 /* ---------- Nav / view switching ---------- */

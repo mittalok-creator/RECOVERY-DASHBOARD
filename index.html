@@ -993,9 +993,12 @@
         <button class="modal-close-x" id="listModalCloseX" aria-label="Close">✕</button>
       </div>
     </div>
+    <div class="bank-filter-row" style="padding:0 18px 10px">
+      <input type="text" id="listModalAddressFilterInput" class="dash-select" placeholder="Filter by Address…" style="max-width:220px">
+    </div>
     <div class="dash-table-wrap list-modal-scroll">
       <table class="dash-table">
-        <thead id="listModalHead"><tr><th>Account</th><th class="tal">Customer</th><th class="tal">Branch</th><th>Asset</th><th>Amount</th></tr></thead>
+        <thead id="listModalHead"><tr><th>Account</th><th class="tal">Customer</th><th class="tal">Address</th><th>Asset</th><th>Amount</th></tr></thead>
         <tbody id="listModalBody"></tbody>
       </table>
     </div>
@@ -1218,7 +1221,7 @@
      place their version query strings now live. -->
 <script src="js/login.js?v=20260924a"></script>
 <script id="ots-data" type="application/json">{}</script>
-<script src="js/app.js?v=20260925c"></script>
+<script src="js/app.js?v=20260925d"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
