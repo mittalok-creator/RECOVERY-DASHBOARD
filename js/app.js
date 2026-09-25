@@ -8005,3 +8005,18 @@ if(getStoredPin()){
 } else {
   window.addEventListener('upgb-pin-unlocked', () => loadNpaData(false), { once: true });
 }
+
+/* Alok, 2026-09-25: "dono app har 1 ghante par auto refresh ho jayen jisse
+   jo bhi main kuch naya push karun wo apne aap live ho jaye" -- a branch
+   PC's tab left open all day should never drift more than an hour behind
+   a fresh Publish on the main site, without anyone remembering to hard-
+   refresh it. Also a real mitigation for the stale-app-shell-cache class
+   of bug seen today (sw.js's stale-while-revalidate for index.html/the JS
+   bundle can otherwise leave a long-lived tab running yesterday's code
+   until it's manually reloaded). This portal is read-only (no
+   Upload/Publish of its own -- js/publish.js doesn't exist here), and any
+   per-device state a viewer has typed (PNPA remarks, the address/branch
+   filters) is either already saved to localStorage or trivial UI state,
+   so an unconditional reload is safe here unlike the main app's own
+   version of this same timer. */
+setInterval(() => location.reload(), 60 * 60 * 1000);
