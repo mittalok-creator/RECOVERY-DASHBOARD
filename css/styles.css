@@ -2136,6 +2136,27 @@ html,body{overscroll-behavior:none}
 .pnpa-remark-note{font-weight:500;text-transform:none;letter-spacing:0;color:var(--ink-mute);font-size:10px}
 table.pnpa-slip-table td{white-space:normal}
 table.pnpa-slip-table td:last-child{min-width:160px}
+/* Alok, 2026-09-25, after uploading a real Monthly PNPA file with 20
+   accounts: "niche pure account nahi show ho rahe" (accounts don't fully
+   show below) -- every row was in fact already rendering (confirmed
+   against the real file: exactly 20 <tr> for a "This Month 20" badge),
+   the real problem was the plain (non-sticky) header scrolling away with
+   the rest of the table, so a column further down reads as unlabelled
+   floating numbers with nothing to say "CADU" vs "Cust NPA Date" -- easy
+   to misread as data missing. A plain `position:sticky` on the header
+   here does NOT work, though -- .dash-table-wrap already sets
+   `overflow-x:auto` for horizontal scroll, and per spec that silently
+   forces `overflow-y` to `auto` too, which makes the wrapper itself
+   (rather than the page's real scrolling ancestor further up) the
+   context sticky binds to; since the wrapper never scrolls on its own,
+   the header never actually stays put. Reusing the wrapper's existing
+   `.acct-list-scroll` variant (js/app.js, renderPnpaSlipTable) sidesteps
+   this the same way the "All Accounts" table already does: a real,
+   bounded internal scrollbar that sticky positioning binds to correctly.
+   .dash-table-wrap.acct-list-scroll{max-height:560px;overflow-y:auto} and
+   its own `thead th{position:sticky;top:0;background:var(--table-head);
+   z-index:1}` rule (both already defined earlier in this file) apply
+   automatically once that class is present -- no new CSS needed here. */
 
 /* ---------- Dashboard: KCC / Non-KCC split stat ---------- */
 .split-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;width:100%}

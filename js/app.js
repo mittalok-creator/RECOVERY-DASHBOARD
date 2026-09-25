@@ -6325,6 +6325,16 @@ window.setPnpaSlipTab = setPnpaSlipTab;
 function pnpaAddressFor(acctNo){
   return addressForAcctNo(acctNo);
 }
+// Sortable via the same generic applySort()/nextSort()/updateSortIcons()
+// engine Dashboard's All Accounts table and every other sortable table in
+// this app already share (Alok, 2026-09-25: "table main sort filters lagao
+// har heading par" -- every heading, including Remark). Raw PC-indexed
+// rows are mapped into plain {acctNo,name,...} objects only for sorting/
+// rendering purposes -- applySort() does a[key] property lookups, which a
+// raw array index can't do directly.
+let pnpaSlipSort = {key:'os', dir:'desc'};
+function sortPnpaSlipBy(key){ pnpaSlipSort = nextSort(pnpaSlipSort, key); renderPnpaSlipView(); }
+window.sortPnpaSlipBy = sortPnpaSlipBy;
 function renderPnpaSlipTable(list, emptyMessage){
   if(pnpaAddressFilter){
     const q = pnpaAddressFilter.trim().toLowerCase();
@@ -6332,32 +6342,45 @@ function renderPnpaSlipTable(list, emptyMessage){
   }
   if(!list.length) return `<div class="empty-state"><p>${esc(emptyMessage || 'No accounts slipped in this period.')}</p></div>`;
   const remarks = getPnpaRemarks();
-  const rowsHtml = list.map(r=>{
-    const acct = esc(r[PC.ACCT]);
-    const remark = esc(remarks[r[PC.ACCT]] || '');
+  const objs = list.map(r=>({
+    acctNo:r[PC.ACCT], name:r[PC.NAME], address:pnpaAddressFor(r[PC.ACCT]), os:r[PC.OS], cadu:r[PC.CADU],
+    custNpaDate:r[PC.CUSTNPADATE], remark: remarks[r[PC.ACCT]] || '',
+  }));
+  const sorted = applySort(objs, pnpaSlipSort);
+  const rowsHtml = sorted.map(o=>{
+    const acct = esc(o.acctNo);
+    const remark = esc(o.remark);
     return `<tr>
       <td class="clickable" onclick="showQuickAcctDetailByAcct('pnpa','${acct}')">${acct}</td>
-      <td class="tal clickable" onclick="showQuickAcctDetailByAcct('pnpa','${acct}')">${esc(r[PC.NAME])||'—'}</td>
-      <td class="tal">${esc(pnpaAddressFor(r[PC.ACCT]))||'—'}</td>
-      <td>${fmtINR2(r[PC.OS])}</td>
-      <td>${fmtINR2(r[PC.CADU])}</td>
-      <td>${esc(r[PC.CUSTNPADATE])||'—'}</td>
+      <td class="tal clickable" onclick="showQuickAcctDetailByAcct('pnpa','${acct}')">${esc(o.name)||'—'}</td>
+      <td class="tal">${esc(o.address)||'—'}</td>
+      <td>${fmtINR2(o.os)}</td>
+      <td>${fmtINR2(o.cadu)}</td>
+      <td class="tal">${esc(o.custNpaDate)||'—'}</td>
       <td class="tal">
         <input type="text" class="pnpa-remark-input" value="${remark}" placeholder="Remark…" onchange="savePnpaRemark('${acct}', this)">
         <span class="pnpa-remark-status">Saved on this device</span>
       </td>
     </tr>`;
   }).join('');
-  return `<div class="dash-table-wrap"><table class="dash-table pnpa-slip-table">
-    <thead><tr><th>Account</th><th class="tal">Name</th><th class="tal">Address</th><th>Balance</th><th>CADU</th><th>Cust NPA Date</th><th class="tal">Remark <span class="pnpa-remark-note">(saved on this device only)</span></th></tr></thead>
+  return `<div class="dash-table-wrap acct-list-scroll"><table class="dash-table pnpa-slip-table">
+    <thead id="pnpaSlipTableHead"><tr>
+      <th class="sortable" data-key="acctNo" tabindex="0" role="button" aria-sort="none" onclick="sortPnpaSlipBy('acctNo')">Account<span class="sort-ic">▾</span></th>
+      <th class="tal sortable" data-key="name" tabindex="0" role="button" aria-sort="none" onclick="sortPnpaSlipBy('name')">Name<span class="sort-ic">▾</span></th>
+      <th class="tal sortable" data-key="address" tabindex="0" role="button" aria-sort="none" onclick="sortPnpaSlipBy('address')">Address<span class="sort-ic">▾</span></th>
+      <th class="sortable" data-key="os" tabindex="0" role="button" aria-sort="none" onclick="sortPnpaSlipBy('os')">Balance<span class="sort-ic">▾</span></th>
+      <th class="sortable" data-key="cadu" tabindex="0" role="button" aria-sort="none" onclick="sortPnpaSlipBy('cadu')">CADU<span class="sort-ic">▾</span></th>
+      <th class="tal sortable" data-key="custNpaDate" tabindex="0" role="button" aria-sort="none" onclick="sortPnpaSlipBy('custNpaDate')">Cust NPA Date<span class="sort-ic">▾</span></th>
+      <th class="tal sortable" data-key="remark" tabindex="0" role="button" aria-sort="none" onclick="sortPnpaSlipBy('remark')">Remark <span class="pnpa-remark-note">(saved on this device only)</span><span class="sort-ic">▾</span></th>
+    </tr></thead>
     <tbody>${rowsHtml}</tbody>
   </table></div>`;
 }
 function pnpaSlipSummaryChips(totals){
   return `<div class="pnpa-slip-summary">
-    <div class="pnpa-slip-chip"><span class="lbl">KCC</span><span class="cnt">${totals.kcc.cnt.toLocaleString('en-IN')} A/C</span><span class="amt">${fmtINR2(totals.kcc.amt)}</span></div>
-    <div class="pnpa-slip-chip"><span class="lbl">Non-KCC</span><span class="cnt">${totals.nonkcc.cnt.toLocaleString('en-IN')} A/C</span><span class="amt">${fmtINR2(totals.nonkcc.amt)}</span></div>
-    <div class="pnpa-slip-chip total"><span class="lbl">Total</span><span class="cnt">${totals.all.cnt.toLocaleString('en-IN')} A/C</span><span class="amt">${fmtINR2(totals.all.amt)}</span></div>
+    <div class="pnpa-slip-chip"><span class="lbl">KCC</span><span class="cnt">${totals.kcc.cnt.toLocaleString('en-IN')} A/C</span><span class="amt">${fmtCr(totals.kcc.amt)}</span></div>
+    <div class="pnpa-slip-chip"><span class="lbl">Non-KCC</span><span class="cnt">${totals.nonkcc.cnt.toLocaleString('en-IN')} A/C</span><span class="amt">${fmtCr(totals.nonkcc.amt)}</span></div>
+    <div class="pnpa-slip-chip total"><span class="lbl">Total</span><span class="cnt">${totals.all.cnt.toLocaleString('en-IN')} A/C</span><span class="amt">${fmtCr(totals.all.amt)}</span></div>
   </div>`;
 }
 /* Alok's own explicit instruction (2026-09-25): lead the PNPA Slippage
@@ -6377,17 +6400,17 @@ function pnpaTodayHeroBlocks(todayTotals){
       <div class="pnpa-today-card total clickable" onclick="setPnpaSlipTab('today')">
         <span class="lbl">Total Slippage</span>
         <span class="cnt">${todayTotals.all.cnt.toLocaleString('en-IN')} A/C</span>
-        <span class="amt">${fmtINR2(todayTotals.all.amt)}</span>
+        <span class="amt">${fmtCr(todayTotals.all.amt)}</span>
       </div>
       <div class="pnpa-today-card kcc clickable" onclick="setPnpaSlipTab('today')">
         <span class="lbl">KCC Slippage</span>
         <span class="cnt">${todayTotals.kcc.cnt.toLocaleString('en-IN')} A/C</span>
-        <span class="amt">${fmtINR2(todayTotals.kcc.amt)}</span>
+        <span class="amt">${fmtCr(todayTotals.kcc.amt)}</span>
       </div>
       <div class="pnpa-today-card nonkcc clickable" onclick="setPnpaSlipTab('today')">
         <span class="lbl">Non-KCC &amp; Technical</span>
         <span class="cnt">${todayTotals.nonkcc.cnt.toLocaleString('en-IN')} A/C</span>
-        <span class="amt">${fmtINR2(todayTotals.nonkcc.amt)}</span>
+        <span class="amt">${fmtCr(todayTotals.nonkcc.amt)}</span>
         <span class="note">Technical breakdown to be added</span>
       </div>
     </div>
@@ -6438,6 +6461,7 @@ function renderPnpaSlipView(){
   `;
   const addrInput = document.getElementById('pnpaAddressFilterInput');
   if(addrInput) addrInput.onchange = () => { pnpaAddressFilter = addrInput.value; renderPnpaSlipView(); };
+  updateSortIcons('pnpaSlipTableHead', pnpaSlipSort);
 }
 window.renderPnpaSlipView = renderPnpaSlipView;
 
