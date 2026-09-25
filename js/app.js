@@ -593,6 +593,20 @@ function titleCase(s){ return String(s||'').toLowerCase().replace(/\b\w/g,c=>c.t
    Hathras Service Branch, Hatisa -> Hatisa Bhagwantpur). All 57 Old/New Sol
    ID pairs matched the sheet exactly, no other differences. */
 const BRANCH_LIST = [[15990,9269,"R O Hathras"],[15010,9270,"Agsauli"],[15020,9271,"Bamnai"],[15030,9272,"Bandhnoo"],[15040,9273,"Baraus"],[15050,9274,"Bastoi"],[15060,9275,"Bisawar"],[15070,9276,"Chandpa"],[15080,9277,"Chhonda Gadua"],[15090,9278,"Devinagar"],[15100,9279,"Eihan"],[15110,9280,"Hathras Agra Road"],[15120,9281,"Hathras Aligarh Road"],[15130,9282,"Mursan Gate"],[15140,9283,"Hathras Service Branch"],[15150,9284,"Hatisa Bhagwantpur"],[15160,9285,"Jarera"],[15170,9286,"Komari"],[15180,9287,"Kota"],[15190,9288,"Ladpur"],[15200,9289,"Mahow"],[15210,9290,"Meetai"],[15220,9291,"Mendu"],[15230,9292,"Mughal Garhi"],[15240,9293,"Mursan"],[15250,9294,"Parsara"],[15260,9295,"Pora"],[15270,9296,"Purdil Nagar"],[15280,9297,"Ratibhanpur"],[15290,9298,"Ruheri"],[15300,9299,"Sadabad"],[15310,9300,"Sahpau"],[15320,9301,"Salempur"],[15330,9302,"Sasni"],[15340,9303,"Sikandra Rao"],[15350,9304,"Tuksan"],[15360,9305,"Wazidpur"],[15370,9306,"Adarshnagar"],[15380,9307,"Hasayan"],[15390,9308,"Jaleser Road"],[15400,9309,"Naugaon"],[16010,9310,"Bajna"],[16020,9311,"Baldev"],[16030,9312,"Bati"],[16040,9313,"Damodarpura"],[16050,9314,"Farah"],[16060,9315,"Goverdhan"],[16070,9316,"Maant"],[16080,9317,"Mathura City"],[16090,9318,"Laxmi Nagar"],[16100,9319,"Pali Kheda"],[16110,9320,"Raya"],[16120,9321,"Ronchi Bangar"],[16130,9322,"Sonai"],[16140,9323,"Tarsi"],[16150,9324,"Vrindavan"],[16160,9325,"Jajan Patti"]];
+// Reverse lookup, Sol ID -> canonical branch name, straight off BRANCH_LIST
+// (guaranteed complete for every valid Sol ID). Alok, 2026-09-25: "9283
+// kholne par sari branches show ho rahe hain" -- Sol 9283 (Hathras Service
+// Branch) has zero rows of its own in the NPA book / KCC Overdue / PNPA
+// (a back-office branch with no live loan accounts), so every branch-lock
+// resolver below, which only ever looked for the Sol ID's branch name
+// among the branch names actually PRESENT in that dataset, silently fell
+// back to '' (empty = "Regional Office (all branches)") for exactly this
+// case -- the one branch-name source that can never come up empty for a
+// valid Sol ID is this master list itself, used as the last-resort
+// fallback so a real Sol ID always locks to SOME specific branch (even one
+// with zero rows in a given table -- correctly showing "your branch, zero
+// accounts" there, never "show everyone's").
+const SOL_TO_BRANCH_NAME = Object.fromEntries(BRANCH_LIST.map(([,newId,name])=>[String(newId), name]));
 /* Branch master data from the same frozen UPGB_NEW_SOL_ID.xlsx source as
    BRANCH_LIST above -- branch code, official branch email, RO/Branch type,
    Urban/Rural/Semi Urban area, district, registered address, PIN, and date
@@ -5219,7 +5233,12 @@ function loggedInBranchName(){
   const solId = loggedInSolId();
   if(!solId){ __recoveryBranchName = ''; return __recoveryBranchName; }
   const row = DATA.npa.rows.find(r=>String(r[C.SOL_ID])===String(solId));
-  __recoveryBranchName = row ? (row[C.SOL_DESC]||'') : '';
+  // Falls back to BRANCH_LIST's own canonical name when this Sol ID has no
+  // row of its own in the NPA book (e.g. a Service Branch with no live
+  // loan accounts) -- see SOL_TO_BRANCH_NAME's own comment for why this
+  // matters: without it, this silently resolved to '' ("Regional Office",
+  // i.e. every branch), defeating the whole point of Sol-based login.
+  __recoveryBranchName = row ? (row[C.SOL_DESC]||'') : (SOL_TO_BRANCH_NAME[String(solId)] || '');
   return __recoveryBranchName;
 }
 function populateBranchFilter(branches){
@@ -6298,7 +6317,10 @@ function pnpaLoggedInBranchName(rows){
   const solId = loggedInSolId();
   if(!solId){ __pnpaLockedBranch = ''; return __pnpaLockedBranch; }
   const allBranches = [...new Set(rows.map(r=>r[PC.BRANCH]))];
-  __pnpaLockedBranch = allBranches.find(b=>String(KCCOV_BRANCH_SOL[String(b).toUpperCase()])===String(solId)) || '';
+  // Falls back to BRANCH_LIST's own canonical name when this Sol ID's
+  // branch has no rows of its own in this dataset (e.g. no PNPA slippage
+  // this period) -- see SOL_TO_BRANCH_NAME's own comment.
+  __pnpaLockedBranch = allBranches.find(b=>String(KCCOV_BRANCH_SOL[String(b).toUpperCase()])===String(solId)) || SOL_TO_BRANCH_NAME[String(solId)] || '';
   return __pnpaLockedBranch;
 }
 
@@ -6711,7 +6733,12 @@ function renderKccOverdueBody(){
   // Locked (not just defaulted): force kccovBranchFilter to it every
   // render, ignoring any stray manual selection.
   const lockedSolId = loggedInSolId();
-  const lockedKccBranch = lockedSolId ? allBranches.find(b=>String(KCCOV_BRANCH_SOL[String(b).toUpperCase()])===String(lockedSolId)) : null;
+  // Falls back to BRANCH_LIST's own canonical name when this Sol ID's
+  // branch has no rows of its own in this dataset (e.g. no KCC Overdue
+  // accounts this period) -- see SOL_TO_BRANCH_NAME's own comment. Without
+  // this, the branch lock silently fell through to an open, all-branches
+  // picker instead of a locked label for a real Sol ID.
+  const lockedKccBranch = lockedSolId ? (allBranches.find(b=>String(KCCOV_BRANCH_SOL[String(b).toUpperCase()])===String(lockedSolId)) || SOL_TO_BRANCH_NAME[String(lockedSolId)] || null) : null;
   if(lockedKccBranch) kccovBranchFilter = lockedKccBranch;
   const branchFilterOptions = `<option value="">Regional Office</option>` +
     allBranches.map(b=>`<option value="${esc(b)}"${kccovBranchFilter===b?' selected':''}>${esc(b)}</option>`).join('');
