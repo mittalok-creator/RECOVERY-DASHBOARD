@@ -6542,6 +6542,9 @@ let kccovDateFrom = '';
 let kccovDateTo = '';
 let kccovAddressFilter = '';
 let kccovView = 'summary'; // 'summary' | 'calendar' | 'fymonth'
+let kccovBranchSort = {key:'os', dir:'desc'};
+function sortKccovBranchBy(key){ kccovBranchSort = nextSort(kccovBranchSort, key); renderKccOverdueBody(); }
+window.sortKccovBranchBy = sortKccovBranchBy;
 // Datewise Calendar's own column sort -- {key:'sol'|'branch'|'total'|<date
 // string>, dir:'asc'|'desc'}. Starts null so renderKccOverdueCalendar()
 // can tell "never sorted yet" apart from "user explicitly re-sorted" and
@@ -6820,10 +6823,11 @@ function renderKccOverdueBranchTable(filteredRows){
   const labelEl = document.getElementById('kccovTableLabel');
   if(!wrap) return;
   const activeScheme = KCC_OVERDUE_SCHEMES.find(s=>s.key===kccovSchemeTab);
-  const list = filteredRows.filter(r=>kccOverdueBucketOf(r[KC.SCHEME])===kccovSchemeTab).map(r=>({
+  const unsorted = filteredRows.filter(r=>kccOverdueBucketOf(r[KC.SCHEME])===kccovSchemeTab).map(r=>({
     acctNo:r[KC.ACCT], name:r[KC.NAME], address:kccovAddressFor(r[KC.ACCT]), os:r[KC.OS], cadu:r[KC.CADU], limit:r[KC.LIMIT],
     custNpaDate:r[KC.CUSTNPADATE], fy:r[KC.FY], category:r[KC.CATEGORY], sma:r[KC.SMA],
-  })).sort((a,b)=>b.os-a.os);
+  }));
+  const list = applySort(unsorted, kccovBranchSort);
   const scopeLabel = kccovBranchFilter ? esc(kccovBranchFilter) : 'Regional Office (all branches)';
   kccovLastExport = { list, schemeLabel: activeScheme.label, schemeCode: activeScheme.code, scopeLabel };
   if(labelEl) labelEl.innerHTML = `${esc(activeScheme.label)} — Account-wise list, highest O/S first<span class="chart-sub">Scheme ${esc(activeScheme.code)} · ${scopeLabel} · ${list.length.toLocaleString('en-IN')} account(s) shown · tap an account for details</span>`;
@@ -6837,10 +6841,18 @@ function renderKccOverdueBranchTable(filteredRows){
   </tr>`).join('');
   wrap.innerHTML = `<div class="dash-table-wrap acct-list-scroll">
     <table class="dash-table">
-      <thead><tr><th class="tal">Account</th><th class="tal">Customer</th><th class="tal">Address</th><th>O/S</th><th>CADU</th><th class="tal">Cust NPA Date</th></tr></thead>
+      <thead id="kccovBranchTableHead"><tr>
+        <th class="tal sortable" data-key="acctNo" tabindex="0" role="button" aria-sort="none" onclick="sortKccovBranchBy('acctNo')">Account<span class="sort-ic">▾</span></th>
+        <th class="tal sortable" data-key="name" tabindex="0" role="button" aria-sort="none" onclick="sortKccovBranchBy('name')">Customer<span class="sort-ic">▾</span></th>
+        <th class="tal sortable" data-key="address" tabindex="0" role="button" aria-sort="none" onclick="sortKccovBranchBy('address')">Address<span class="sort-ic">▾</span></th>
+        <th class="sortable" data-key="os" tabindex="0" role="button" aria-sort="none" onclick="sortKccovBranchBy('os')">O/S<span class="sort-ic">▾</span></th>
+        <th class="sortable" data-key="cadu" tabindex="0" role="button" aria-sort="none" onclick="sortKccovBranchBy('cadu')">CADU<span class="sort-ic">▾</span></th>
+        <th class="tal sortable" data-key="custNpaDate" tabindex="0" role="button" aria-sort="none" onclick="sortKccovBranchBy('custNpaDate')">Cust NPA Date<span class="sort-ic">▾</span></th>
+      </tr></thead>
       <tbody>${rowsHtml || emptyStateRowHtml(6, 'No accounts match this filter')}</tbody>
     </table>
   </div>`;
+  updateSortIcons('kccovBranchTableHead', kccovBranchSort);
 }
 /* Exports exactly the account list currently on screen (same scheme tab /
    branch / F.Y. / address / date filters) -- kept WYSIWYG so the file
