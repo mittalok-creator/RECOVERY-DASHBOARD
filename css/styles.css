@@ -1039,6 +1039,7 @@ footer.app-foot{display:none;text-align:center;padding:26px 18px calc(28px + env
 .upload-status.info{background:var(--accent-soft);color:var(--accent)}
 .upload-status.ok{background:var(--green-soft);color:var(--green)}
 .upload-status.err{background:var(--red-soft);color:var(--red)}
+.upload-status.warn{background:var(--amber-soft);color:#8a6114}
 .upload-summary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
 .upload-summary .box{background:var(--bg);border-radius:11px;padding:11px 13px;border:1px solid var(--line)}
 .upload-summary .box .k{font-size:9.5px;text-transform:uppercase;color:var(--sub);font-weight:700;letter-spacing:.5px}
