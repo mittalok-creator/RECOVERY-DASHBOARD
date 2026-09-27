@@ -392,6 +392,21 @@ function otsAppFormatDMonY(date){
   const dd=String(date.getDate()).padStart(2,'0');
   return dd+'-'+months[date.getMonth()]+'-'+date.getFullYear();
 }
+/* Plain flex rows instead of a real <ol>/<li> -- html2canvas (used by both
+   Save-as-PDF and WhatsApp Share) doesn't reserve any marker-box width for
+   native list numbering, so a real <ol> renders as "1यह कि..." with the
+   number jammed straight against the text, no gap at all (confirmed
+   against a real generated PDF, 2026-09-27). Hand-numbering with a
+   fixed-width column renders identically in native print, on-screen and
+   in the html2canvas raster -- one shared implementation for all three
+   output paths instead of a print-only fix that would leave the PDF/
+   WhatsApp paths still broken. */
+function otsAppPoint(num, text, bold){
+  return '<div style="display:flex;gap:6px;margin-bottom:12px;' + (bold?'font-weight:bold;':'') + '">'
+    + '<div style="flex:none;min-width:20px;">' + num + '.</div>'
+    + '<div style="flex:1;">' + text + '</div>'
+    + '</div>';
+}
 const OTS_APP_HINDI_0_99=['शून्य','एक','दो','तीन','चार','पांच','छह','सात','आठ','नौ','दस',
 'ग्यारह','बारह','तेरह','चौदह','पंद्रह','सोलह','सत्रह','अठारह','उन्नीस','बीस',
 'इक्कीस','बाईस','तेईस','चौबीस','पच्चीस','छब्बीस','सत्ताईस','अट्ठाईस','उनतीस','तीस',
@@ -452,16 +467,16 @@ function buildOtsApplicationFormHTML(row, d){
     + '<div style="margin:16px 0 8px 0;">महोदय,</div>'
     + '<div>विषय: समझौता प्रस्ताव श्री/श्रीमती/म॰ <b>' + esc(row[C.NAME]||'') + '</b> खाता संख्या <b>' + esc(row[C.ACCT_NO]||'') + '</b></div>'
     + '<div style="margin-top:10px;">उक्त सन्दर्भ में आपको अवगत कराना है कि आप द्वारा ऋण खाते के निपटान हेतु दी जाने वाली सुविधा का हम लाभ प्राप्त करना चाहते हैं। अतः आपसे सन्दर्भित ऋण खाते के निपटान हेतु निम्न अनुरोध है:</div>'
-    + '<ol style="margin-top:12px; padding-left:24px;">'
-    +   '<li style="margin-bottom:12px;">यह कि हमने / उपरोक्त ऋणी ने आपकी शाखा से ' + esc(purpose) + ' उद्देश्य हेतु रु. ' + loanAmt.toFixed(2) + '/- का बैंक ऋण दिनांक ' + loanDate + ' को लिया था। वर्तमान में खाते में रु. ' + outstanding.toFixed(2) + '/- एवं ब्याज इत्यादि अवशेष है।</li>'
-    +   '<li style="margin-bottom:12px;">इस आवेदन के साथ हमारे द्वारा अपने (ऋणियों के) पैन कार्ड एवं आधार कार्ड की प्रति संलग्न की जा रही है (Not applicable for Deceased)।</li>'
-    +   '<li style="margin-bottom:12px;">यह कि उक्त बकाया/ऋणों के निपटान हेतु हम रु. ' + otsAmt.toFixed(2) + '/- (' + otsAppHindiRupeesOnly(otsAmt) + ') देकर समझौता आधारित निपटान चाहते हैं, जिसका न्यूनतम धनराशि जो कि रु. ' + tokenAmt.toFixed(2) + '/- (' + otsAppHindiRupeesOnly(tokenAmt) + ') होता है, इस समझौता प्रस्ताव के साथ ही शाखा में जमा किया जा रहा है।</li>'
-    +   '<li style="margin-bottom:12px; font-weight:bold;">यह कि समझौता आधारित शेष निपटान राशि हम एकमुश्त दिनांक ' + restDateStr + ' तक जमा करने हेतु वचनबद्ध हैं।</li>'
-    +   '<li style="margin-bottom:12px; font-weight:bold;">यह कि निपटान राशि रु. ' + otsAmt.toFixed(2) + '/- हम स्वयं के स्रोत से जमा करेंगे,</li>'
-    +   '<li style="margin-bottom:12px;">निपटान राशि पर बैंक द्वारा निर्धारित वसूली प्रक्रिया/कलेक्शन चार्जेस, यथायोग्य देने हेतु सहमत हैं।</li>'
-    +   '<li style="margin-bottom:12px;">यह कि उपरोक्त वर्णित बिन्दुओं के अनुसार यदि उक्त निपटान राशि का कुल भुगतान समय से नहीं होता है, तो बैंक को यह अधिकार होगा कि सम्पूर्ण ऋण राशि की वसूली निर्धारित नियम एवं शर्तों के अनुरूप करे।</li>'
-    +   '<li style="font-weight:bold;">समझौता पश्चात् हमारे द्वारा 12 माह से पहले बैंक की किसी भी शाखा में किसी भी ऋण हेतु आवेदन प्रस्तुत नहीं किया जाएगा।</li>'
-    + '</ol>'
+    + '<div style="margin-top:12px;">'
+    +   otsAppPoint(1, 'यह कि हमने / उपरोक्त ऋणी ने आपकी शाखा से ' + esc(purpose) + ' उद्देश्य हेतु रु. ' + loanAmt.toFixed(2) + '/- का बैंक ऋण दिनांक ' + loanDate + ' को लिया था। वर्तमान में खाते में रु. ' + outstanding.toFixed(2) + '/- एवं ब्याज इत्यादि अवशेष है।')
+    +   otsAppPoint(2, 'इस आवेदन के साथ हमारे द्वारा अपने (ऋणियों के) पैन कार्ड एवं आधार कार्ड की प्रति संलग्न की जा रही है (Not applicable for Deceased)।')
+    +   otsAppPoint(3, 'यह कि उक्त बकाया/ऋणों के निपटान हेतु हम रु. ' + otsAmt.toFixed(2) + '/- (' + otsAppHindiRupeesOnly(otsAmt) + ') देकर समझौता आधारित निपटान चाहते हैं, जिसका न्यूनतम धनराशि जो कि रु. ' + tokenAmt.toFixed(2) + '/- (' + otsAppHindiRupeesOnly(tokenAmt) + ') होता है, इस समझौता प्रस्ताव के साथ ही शाखा में जमा किया जा रहा है।')
+    +   otsAppPoint(4, 'यह कि समझौता आधारित शेष निपटान राशि हम एकमुश्त दिनांक ' + restDateStr + ' तक जमा करने हेतु वचनबद्ध हैं।', true)
+    +   otsAppPoint(5, 'यह कि निपटान राशि रु. ' + otsAmt.toFixed(2) + '/- हम स्वयं के स्रोत से जमा करेंगे,', true)
+    +   otsAppPoint(6, 'निपटान राशि पर बैंक द्वारा निर्धारित वसूली प्रक्रिया/कलेक्शन चार्जेस, यथायोग्य देने हेतु सहमत हैं।')
+    +   otsAppPoint(7, 'यह कि उपरोक्त वर्णित बिन्दुओं के अनुसार यदि उक्त निपटान राशि का कुल भुगतान समय से नहीं होता है, तो बैंक को यह अधिकार होगा कि सम्पूर्ण ऋण राशि की वसूली निर्धारित नियम एवं शर्तों के अनुरूप करे।')
+    +   otsAppPoint(8, 'समझौता पश्चात् हमारे द्वारा 12 माह से पहले बैंक की किसी भी शाखा में किसी भी ऋण हेतु आवेदन प्रस्तुत नहीं किया जाएगा।', true)
+    + '</div>'
     + '<div style="font-size:12px; margin-top:8px;">नोट: यह स्वीकृति 3 माह तक वैध रहेगी तथा 3 माह के अंदर पूर्ण समझौता न जमा होने पर उक्त स्वीकृति स्वतः निरस्त मानी जाएगी।</div>'
     + '<div style="margin-top:24px;">भवदीय,</div>'
     + '<div style="display:flex; justify-content:space-between; margin-top:64px;">'
@@ -625,7 +640,7 @@ function renderOtsApplicationDetail(){
   const meta = BRANCH_META[Number(row[C.SOL_ID])] || {};
   const acctOpenDate = toDate(row[C.OPN_DT]);
   wrap.innerHTML = '<div class="card">'
-    + '<div style="font-weight:800;margin-bottom:4px;">Account found — auto-filled details</div>'
+    + '<div style="font-weight:800;margin-bottom:4px;">Account Details (Auto-Filled from Records)</div>'
     + '<div class="info-grid">'
     +   '<div><div class="k">Name</div><div class="v">' + (esc(row[C.NAME])||'—') + '</div></div>'
     +   '<div><div class="k">Account No.</div><div class="v">' + (esc(row[C.ACCT_NO])||'—') + '</div></div>'
@@ -633,13 +648,15 @@ function renderOtsApplicationDetail(){
     +   '<div><div class="k">District</div><div class="v">' + (esc(meta.district)||'—') + '</div></div>'
     +   '<div><div class="k">Mobile No.</div><div class="v">' + (esc(row[C.PHONE])||'—') + '</div></div>'
     +   '<div><div class="k">Loan Amount / Date</div><div class="v">' + fmtINR2(Number(row[C.SANCT_LIM])||0) + ' · ' + fmtDate(acctOpenDate) + '</div></div>'
+    +   '<div><div class="k">Outstanding (as per records)</div><div class="v">' + fmtINR2(Number(row[C.OUTBAL])||0) + '</div></div>'
     + '</div>'
     + '</div>'
     + '<div class="card">'
     + '<div style="font-weight:800;margin-bottom:12px;">Please enter these details</div>'
     + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;">'
     +   '<div><label style="display:block;font-size:12px;font-weight:700;color:var(--sub);margin-bottom:5px;">Outstanding as on Date of OTS <span style="color:#d1425a;">*</span></label>'
-    +   '<input type="text" inputmode="decimal" id="otsAppOutstanding" class="dash-select" style="width:100%;min-width:0" placeholder="e.g. 245000"></div>'
+    +   '<input type="text" inputmode="decimal" id="otsAppOutstanding" class="dash-select" style="width:100%;min-width:0" placeholder="e.g. 245000">'
+    +   '<div style="font-size:11px;color:var(--sub);margin-top:4px;">Records show ' + fmtINR2(Number(row[C.OUTBAL])||0) + ' — enter the actual figure as on the settlement date.</div></div>'
     +   '<div><label style="display:block;font-size:12px;font-weight:700;color:var(--sub);margin-bottom:5px;">Purpose of Loan</label>'
     +   '<input type="text" id="otsAppPurpose" class="dash-select" style="width:100%;min-width:0" placeholder="e.g. पशुपालन हेतु"></div>'
     +   '<div><label style="display:block;font-size:12px;font-weight:700;color:var(--sub);margin-bottom:5px;">OTS / Compromise Amount</label>'
