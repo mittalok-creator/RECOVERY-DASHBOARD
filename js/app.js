@@ -6666,8 +6666,20 @@ window.savePnpaRemark = function(acctNo, inputEl){
 
 let pnpaSlipTab = 'today';
 let pnpaAddressFilter = '';
+// 'all'|'kcc'|'nonkcc' -- deliberately independent of pnpaSlipTab (picking
+// KCC then switching to This Month keeps showing just KCC accounts for
+// that period, rather than silently resetting the scheme choice).
+let pnpaSlipSchemeFilter = 'all';
 function setPnpaSlipTab(tab){ pnpaSlipTab = tab; renderPnpaSlipView(); }
 window.setPnpaSlipTab = setPnpaSlipTab;
+function setPnpaSlipScheme(scheme){ pnpaSlipSchemeFilter = scheme; renderPnpaSlipView(); }
+window.setPnpaSlipScheme = setPnpaSlipScheme;
+// The Today hero cards jump to the Today tab AND set the scheme filter in
+// one render, per the existing documented behavior ("Clicking any card
+// jumps to the Today tab") -- calling setPnpaSlipTab()+setPnpaSlipScheme()
+// separately would trigger two renders back to back.
+function pnpaSlipTodayCardClick(scheme){ pnpaSlipTab = 'today'; pnpaSlipSchemeFilter = scheme; renderPnpaSlipView(); }
+window.pnpaSlipTodayCardClick = pnpaSlipTodayCardClick;
 
 // PNPA rows carry no per-row address of their own -- resolved via the
 // shared addressForAcctNo() (see its own comment near normId()), which
@@ -6728,11 +6740,20 @@ function renderPnpaSlipTable(list, emptyMessage){
     <tbody>${rowsHtml}</tbody>
   </table></div>`;
 }
-function pnpaSlipSummaryChips(totals){
+// Alok, 2026-09-27: "in par click karne se kuch nahi ho raha jabki in par
+// click karne par respective accounts ki list hi niche aani chahiye" --
+// these 3 chips (and the matching 3 cards in pnpaTodayHeroBlocks below)
+// used to be pure display, no scheme filter existed anywhere in this view
+// at all -- clicking KCC/Non-KCC never narrowed the table below to just
+// that scheme. Wired to the new pnpaSlipSchemeFilter state below; `active`
+// marks whichever scheme is currently selected (not just the ever-blue
+// `.total` styling, which was being mistaken for a selected state).
+function pnpaSlipSummaryChips(totals, activeScheme){
+  const chip = (key, cls, label, t) => `<div class="pnpa-slip-chip clickable${cls?' '+cls:''}${activeScheme===key?' active':''}" onclick="setPnpaSlipScheme('${key}')"><span class="lbl">${label}</span><span class="cnt">${t.cnt.toLocaleString('en-IN')} A/C</span><span class="amt">${fmtCr(t.amt)}</span></div>`;
   return `<div class="pnpa-slip-summary">
-    <div class="pnpa-slip-chip"><span class="lbl">KCC</span><span class="cnt">${totals.kcc.cnt.toLocaleString('en-IN')} A/C</span><span class="amt">${fmtCr(totals.kcc.amt)}</span></div>
-    <div class="pnpa-slip-chip"><span class="lbl">Non-KCC</span><span class="cnt">${totals.nonkcc.cnt.toLocaleString('en-IN')} A/C</span><span class="amt">${fmtCr(totals.nonkcc.amt)}</span></div>
-    <div class="pnpa-slip-chip total"><span class="lbl">Total</span><span class="cnt">${totals.all.cnt.toLocaleString('en-IN')} A/C</span><span class="amt">${fmtCr(totals.all.amt)}</span></div>
+    ${chip('kcc','','KCC',totals.kcc)}
+    ${chip('nonkcc','','Non-KCC',totals.nonkcc)}
+    ${chip('all','total','Total',totals.all)}
   </div>`;
 }
 /* Alok's own explicit instruction (2026-09-25): lead the PNPA Slippage
@@ -6745,21 +6766,22 @@ function pnpaSlipSummaryChips(totals){
    what should be split out of it; labelled honestly below rather than
    inventing a filter for a category with no definition yet. Clicking any
    card jumps to the Today tab, which already lists these exact accounts. */
-function pnpaTodayHeroBlocks(todayTotals){
+function pnpaTodayHeroBlocks(todayTotals, pnpaSlipTab, activeScheme){
+  const isActive = (scheme) => pnpaSlipTab==='today' && activeScheme===scheme;
   return `<div class="pnpa-today-hero">
     <div class="pnpa-today-hero-head">Today's Slippage</div>
     <div class="pnpa-today-hero-row">
-      <div class="pnpa-today-card total clickable" onclick="setPnpaSlipTab('today')">
+      <div class="pnpa-today-card total clickable${isActive('all')?' active':''}" onclick="pnpaSlipTodayCardClick('all')">
         <span class="lbl">Total Slippage</span>
         <span class="cnt">${todayTotals.all.cnt.toLocaleString('en-IN')} A/C</span>
         <span class="amt">${fmtCr(todayTotals.all.amt)}</span>
       </div>
-      <div class="pnpa-today-card kcc clickable" onclick="setPnpaSlipTab('today')">
+      <div class="pnpa-today-card kcc clickable${isActive('kcc')?' active':''}" onclick="pnpaSlipTodayCardClick('kcc')">
         <span class="lbl">KCC Slippage</span>
         <span class="cnt">${todayTotals.kcc.cnt.toLocaleString('en-IN')} A/C</span>
         <span class="amt">${fmtCr(todayTotals.kcc.amt)}</span>
       </div>
-      <div class="pnpa-today-card nonkcc clickable" onclick="setPnpaSlipTab('today')">
+      <div class="pnpa-today-card nonkcc clickable${isActive('nonkcc')?' active':''}" onclick="pnpaSlipTodayCardClick('nonkcc')">
         <span class="lbl">Non-KCC &amp; Technical</span>
         <span class="cnt">${todayTotals.nonkcc.cnt.toLocaleString('en-IN')} A/C</span>
         <span class="amt">${fmtCr(todayTotals.nonkcc.amt)}</span>
@@ -6797,19 +6819,21 @@ function renderPnpaSlipView(){
     `<button type="button" class="bank-tab-btn${pnpaSlipTab===t.key?' active':''}" onclick="setPnpaSlipTab('${t.key}')">${t.label} <span class="pnpa-tab-count">${agg[t.key].totals.all.cnt}</span></button>`
   ).join('')}</div>`;
   const active = agg[pnpaSlipTab];
+  const filteredList = pnpaSlipSchemeFilter==='all' ? active.list : active.list.filter(r=>pnpaSlipSchemeKey(r)===pnpaSlipSchemeFilter);
+  const schemeLabel = {all:'', kcc:'KCC ', nonkcc:'Non-KCC '}[pnpaSlipSchemeFilter];
   const emptyMessages = {
-    today: 'No accounts slipped today.',
-    week: __pnpaWeeklyFailed ? 'No Weekly PNPA file uploaded yet.' : 'No accounts in this week\'s slippage file.',
-    month: __pnpaMonthlyFailed ? 'No Monthly PNPA file uploaded yet.' : 'No accounts in this month\'s slippage file.',
+    today: `No ${schemeLabel}accounts slipped today.`,
+    week: __pnpaWeeklyFailed ? 'No Weekly PNPA file uploaded yet.' : `No ${schemeLabel}accounts in this week's slippage file.`,
+    month: __pnpaMonthlyFailed ? 'No Monthly PNPA file uploaded yet.' : `No ${schemeLabel}accounts in this month's slippage file.`,
   };
   el.innerHTML = `
-    ${pnpaTodayHeroBlocks(agg.today.totals)}
+    ${pnpaTodayHeroBlocks(agg.today.totals, pnpaSlipTab, pnpaSlipSchemeFilter)}
     ${tabsHtml}
     <div class="bank-filter-row">
       <input type="text" id="pnpaAddressFilterInput" class="dash-select" placeholder="Filter by Address…" value="${esc(pnpaAddressFilter)}" style="max-width:220px">
     </div>
-    ${pnpaSlipSummaryChips(active.totals)}
-    ${renderPnpaSlipTable(active.list, emptyMessages[pnpaSlipTab])}
+    ${pnpaSlipSummaryChips(active.totals, pnpaSlipSchemeFilter)}
+    ${renderPnpaSlipTable(filteredList, emptyMessages[pnpaSlipTab])}
   `;
   const addrInput = document.getElementById('pnpaAddressFilterInput');
   if(addrInput) addrInput.onchange = () => { pnpaAddressFilter = addrInput.value; renderPnpaSlipView(); };
