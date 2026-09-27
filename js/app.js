@@ -1585,11 +1585,21 @@ window.onLedgerSolIdInput = onLedgerSolIdInput;
 // sol id open hai wahi set kar do" -- prefill it with the logged-in Sol ID
 // by default; still a plain editable input, so it can be overridden for a
 // one-off lookup on a different branch's ledger accounts.
+// initLedgerAcctNumbers() MUST run before the prefill call below -- it
+// captures each account's own real 10-digit suffix (e.g. "0015181213")
+// off the pristine "XXXX..." markup into el.dataset.acctSuffix, which
+// onLedgerSolIdInput() then reads back. Calling the prefill first (as this
+// block briefly did) overwrites every account's textContent down to just
+// the 4-digit Sol ID *before* its suffix is ever captured -- by the time
+// initLedgerAcctNumbers() ran, textContent.slice(4) had nothing left to
+// read, so every account's dataset.acctSuffix silently became '' and every
+// row showed only the Sol ID (confirmed against a real screenshot, all 6
+// rows reading "9321" instead of "9321" + their own suffix, 2026-09-27).
+initLedgerAcctNumbers();
 (function prefillLedgerSolId(){
   const solId = loggedInSolId();
   if(solId) onLedgerSolIdInput(solId);
 })();
-initLedgerAcctNumbers();
 document.addEventListener('keydown', (e)=>{
   if(e.key==='Escape'){ EDGE_PANEL_KEYS.forEach(k=>toggleEdgePanel(k, false)); }
 });
