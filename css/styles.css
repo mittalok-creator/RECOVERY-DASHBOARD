@@ -1963,6 +1963,24 @@ html,body{overscroll-behavior:none}
    no visual difference, just no more lingering containing block. */
 .view.active{display:block;animation:viewIn .34s var(--ease)}
 @keyframes viewIn{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
+/* The "search" view has no real content in this portal (this app has no
+   OTS Calculator, so "Search & Settlement" was never part of its surface)
+   -- its only job is to be .active so #detailPane (a position:fixed;
+   inset:0 overlay nested inside it, see the comment above) has a non-
+   display:none ancestor to paint against. showNpaAccountDetail()/
+   showKccPnpaAccountDetail() toggle its .active class directly, not via
+   switchView(), so it's never really "entering" the way a real navigated-
+   to .view is. Per the comment above, a still-*running* transform
+   animation on an ancestor traps a fixed descendant's positioning to that
+   ancestor's own box for as long as the animation is actually playing --
+   the "no fill-mode" fix only removed the *persistent* version of this
+   trap (after the animation ends), not this transient one. Confirmed via
+   testing: without this override, #detailPane measured ~448px tall
+   instead of the full viewport height in the ~0.34s window right after
+   opening, real enough to make the back button briefly unclickable.
+   Skipping the animation for this one section removes the trap outright
+   -- it has no visible content of its own to animate in anyway. */
+.view[data-view="search"].active{animation:none}
 /* Brief exit fade, played on the OUTGOING view by switchView() before the
    display:none/.active swap -- .view{display:none} is instant with no
    transition of its own, so without this the previous screen used to just

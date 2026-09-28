@@ -5686,51 +5686,125 @@ function showNpaAccountDetail(custId){
   pane.scrollTop = 0;
 }
 window.showNpaAccountDetail = showNpaAccountDetail;
+/* Read-only KCC Overdue / Daily PNPA account Particulars page -- Alok's
+   request, 2026-09-28: "usko bhi apan npa account details ki tarah hi
+   show kar sakte hain kya" -- same full-screen treatment as
+   showNpaAccountDetail() above, not the small #quickAcctModalOverlay
+   popup. Same fields the old popup already showed (KC/PC column reads
+   unchanged), just laid out in the NPA table's own icon-prefixed-row
+   style -- single flat column (no multi-account concept, no Sanction
+   Date/UCI/Provision, which only exist in the full NPA loan book). */
+function kccPnpaParticularsTableHTML(row, source){
+  const isKcc = source==='kccov';
+  const acctNo = isKcc ? row[KC.ACCT] : row[PC.ACCT];
+  const scheme = isKcc ? row[KC.SCHEME] : row[PC.SCHEME];
+  const cols = `<th scope="col"><div class="lt-acc">A/c · ${esc(acctNo)}</div><div class="lt-scheme">${esc(scheme)||''}</div></th>`;
+  const dataRow = (label, icon, val, cls='') => `<tr class="${cls}"><th scope="row" class="lt-label">${ltIconBadge(icon)}<span class="lt-label-text"><span class="lt-label-inner">${label}</span></span></th><td>${val!==null&&val!==undefined&&val!==''?esc(val):'—'}</td></tr>`;
+  const rows = (isKcc ? [
+    ['Outstanding','coin',fmtINR2(row[KC.OS]),'lt-strong'], ['CADU','bars',fmtINR2(row[KC.CADU])],
+    ['Limit','doc',fmtINR2(row[KC.LIMIT])], ['Cust NPA Date','calendar',row[KC.CUSTNPADATE]],
+    ['F.Y.','tag',row[KC.FY]], ['Category','badge',row[KC.CATEGORY]], ['SMA','gauge',row[KC.SMA]],
+    ['Reason','list',row[KC.REASON]],
+  ] : [
+    ['Outstanding','coin',fmtINR2(row[PC.OS]),'lt-strong'], ['CADU','bars',fmtINR2(row[PC.CADU])],
+    ['Limit','doc',fmtINR2(row[PC.LIMIT])], ['Review Date','calendar',row[PC.REVIEW]],
+    ['Reason','list',row[PC.REASON]],
+  ]).map(([label,icon,val,cls])=>dataRow(label,icon,val,cls)).join('');
+  return `
+  <div class="loan-table-wrap">
+  <table class="loan-table">
+    <thead><tr><th scope="col" class="lt-label">${ltIcon('list')}<span class="lt-label-text"><span class="lt-label-inner">Particulars</span></span></th>${cols}</tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  </div>`;
+}
+function drawKccPnpaDetailBody(row, source){
+  const isKcc = source==='kccov';
+  const body = document.getElementById('detailBody');
+  const name = isKcc ? row[KC.NAME] : row[PC.NAME];
+  const branch = isKcc ? row[KC.BRANCH] : row[PC.BRANCH];
+  const acctNo = isKcc ? row[KC.ACCT] : row[PC.ACCT];
+  const scheme = isKcc ? row[KC.SCHEME] : row[PC.SCHEME];
+  const custId = isKcc ? row[KC.CUST_ID] : row[PC.CUST_ID];
+  body.innerHTML = `
+    <div class="card borrower-card">
+      <div class="bcard-top">
+        <div class="bavatar" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20c1.6-3.6 4.8-5.5 7.5-5.5s5.9 1.9 7.5 5.5"/></svg></div>
+        <div class="bcard-title-col">
+          <div class="bname">${esc(name)||'—'}</div>
+        </div>
+        <div class="bcard-branch">${esc(branch)||'—'}</div>
+      </div>
+      <div class="info-grid">
+        <div><div class="k">Account No</div><div class="v">${esc(acctNo)||'—'}</div></div>
+        ${custId?`<div><div class="k">Cust ID</div><div class="v">${esc(custId)}</div></div>`:''}
+        <div><div class="k">Scheme</div><div class="v">${esc(scheme)||'—'}</div></div>
+      </div>
+    </div>
+
+    <div class="loans-col">
+    <div class="section-label">${isKcc?'KCC Overdue':'Daily PNPA'} Particulars</div>
+    <div class="section-sub">${esc(branch)||'—'}</div>
+
+    ${kccPnpaParticularsTableHTML(row, source)}
+  </div>
+  `;
+}
+function showKccPnpaAccountDetail(source, row){
+  const isKcc = source==='kccov';
+  const name = isKcc ? row[KC.NAME] : row[PC.NAME];
+  const branch = isKcc ? row[KC.BRANCH] : row[PC.BRANCH];
+  const sourceLabel = isKcc ? 'KCC Overdue' : 'Daily PNPA';
+  // Most branch drill-down rows open this from inside the account-list
+  // modal (listModalOverlay) -- that modal's z-index (100) sits above
+  // #detailPane's (95), so without closing it first the new page would
+  // render behind it, silently swallowing every click (caught via
+  // testing, same bug NPA-DASHBOARD's mirror of this round found).
+  closeListModal();
+  // Same .active-toggle-directly pattern showNpaAccountDetail() already
+  // uses (see its own comment) instead of switchView('search') -- reuses
+  // closeDetail()'s existing cleanup unchanged, no new state needed.
+  document.querySelector('.view[data-view="search"]')?.classList.add('active');
+  const pane = document.getElementById('detailPane');
+  document.getElementById('shell').classList.add('detail-active');
+  pane.classList.add('open');
+  pane.innerHTML = `
+    <div class="detail-head">
+      <div class="detail-headrow">
+        <button class="back-btn" onclick="closeDetail()" aria-label="Back">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <div class="detail-headtext">
+          <h2>${esc(name)||'—'}</h2>
+          <p>${esc(branch)||''} · ${sourceLabel}</p>
+        </div>
+      </div>
+    </div>
+    <div class="detail-inner">
+      <div id="detailBody" style="padding-top:14px"></div>
+    </div>
+  `;
+  drawKccPnpaDetailBody(row, source);
+  pane.scrollTop = 0;
+}
 /* Recovery Dashboard (branch portal) has no OTS Calculator at all -- an
    'npa' source used to route to openDetail() (the settlement screen) on
    the production site; here it instead opens showNpaAccountDetail() (a
    read-only Particulars view -- Loan Terms + Dues & Provisioning, up to
    Provision, every linked loan account side-by-side -- Alok's request,
    2026-09-28: "itna hi data jitna maine screenshot main diya hai
-   provision tak"). KCC Overdue/PNPA rows still get the small read-only
-   field-grid card below, since neither has a customer ID or the fuller
-   per-loan-account record the Particulars view needs. openDetail() itself
-   (and the whole settlement-calculation code block it depends on) is left
-   in this file, dormant/unreachable, rather than deleted -- safer than a
-   large deletion pass on a copy of a production-adjacent codebase; nothing
-   in this portal's UI calls it. computeSlot()/lookupLoanSlot() (pure data
-   functions, no settlement side effects) are reused unchanged by
-   showNpaAccountDetail() below. */
+   provision tak"). KCC Overdue/PNPA rows now get the full-screen
+   showKccPnpaAccountDetail() above instead of the small popup (2026-09-28
+   follow-up). openDetail() itself (and the whole settlement-calculation
+   code block it depends on) is left in this file, dormant/unreachable,
+   rather than deleted -- safer than a large deletion pass on a copy of a
+   production-adjacent codebase; nothing in this portal's UI calls it.
+   computeSlot()/lookupLoanSlot() (pure data functions, no settlement side
+   effects) are reused unchanged by showNpaAccountDetail() below. */
 function showQuickAcctDetail(source, row){
-  const isKcc = source==='kccov';
   const isNpa = source==='npa';
   if(isNpa){ showNpaAccountDetail(row[C.CUST_ID]); return; }
-  const title = isKcc ? row[KC.NAME] : row[PC.NAME];
-  const branch = isKcc ? row[KC.BRANCH] : row[PC.BRANCH];
-  const sourceLabel = isKcc ? 'KCC Overdue' : 'Daily PNPA';
-  const sub = `${esc(branch)||'—'} · ${sourceLabel}`;
-  const fields = isKcc ? [
-    ['Account No', row[KC.ACCT]], ['Scheme', row[KC.SCHEME]], ['Outstanding', fmtINR2(row[KC.OS])],
-    ['CADU', fmtINR2(row[KC.CADU])], ['Limit', fmtINR2(row[KC.LIMIT])], ['Cust NPA Date', row[KC.CUSTNPADATE]],
-    ['F.Y.', row[KC.FY]], ['Category', row[KC.CATEGORY]], ['SMA', row[KC.SMA]], ['Reason', row[KC.REASON]],
-  ] : [
-    ['Account No', row[PC.ACCT]], ['Scheme', row[PC.SCHEME]], ['Outstanding', fmtINR2(row[PC.OS])],
-    ['CADU', fmtINR2(row[PC.CADU])], ['Limit', fmtINR2(row[PC.LIMIT])], ['Review Date', row[PC.REVIEW]],
-    ['Reason', row[PC.REASON]],
-  ];
-  document.getElementById('quickAcctTitle').textContent = title || '—';
-  document.getElementById('quickAcctSub').innerHTML = sub;
-  // Account No (15 digits) and Reason (can be several comma-joined codes)
-  // are the two fields most likely to be longer than a narrow grid column
-  // on a phone -- give them their own full-width row instead of letting
-  // them wrap mid-digit/mid-word inside a half-width cell (Alok's own
-  // screenshot, 2026-09-25, showed exactly this: "1501351100 02325" split
-  // across two lines).
-  const FULL_WIDTH_KEYS = ['Account No', 'Reason'];
-  document.getElementById('quickAcctGrid').innerHTML = fields.map(([k,v])=>
-    `<div${FULL_WIDTH_KEYS.includes(k)?' class="full"':''}><div class="k">${esc(k)}</div><div class="v">${esc(v!==null&&v!==undefined&&v!==''?v:'—')}</div></div>`
-  ).join('');
-  document.getElementById('quickAcctModalOverlay').classList.add('show');
+  showKccPnpaAccountDetail(source, row);
 }
 window.showQuickAcctDetail = showQuickAcctDetail;
 /* Tapping a row inside the NPA/PNPA/KCC Overdue account-list modal opens
