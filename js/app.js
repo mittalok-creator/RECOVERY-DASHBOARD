@@ -84,6 +84,12 @@ DATA.oldots.rows.forEach(r=>{
    not reset/carried-forward on a daily NPA update since it changes on its
    own, much slower schedule. */
 DATA.branchAdvances = DATA.branchAdvances || {};
+/* Branch/Region NPA Target for the fiscal year, uploaded on NPA-DASHBOARD's
+   own Settings -> Update Data -> "Branch/Region NPA Target" panel -- this
+   portal has no upload of its own, it only ever reads whatever the main
+   app has Published. Powers dashboardNpaTargetStrip()'s "Target for <final
+   month>" tile below. */
+DATA.branchTargets = DATA.branchTargets || {};
 /* Branch Manager / Recovery Officer contacts -- keyed by Sol ID (string),
    uploaded via Update Data -> Branch Contacts. Same "own slow-moving
    schedule, not reset on a daily NPA update" treatment as branchAdvances
@@ -6109,9 +6115,14 @@ function dashboardCornerStats(s){
 /* Recovery Dashboard (branch portal) only -- Today's NPA total, the gap
    against the existing March 2026 baseline (DATA.branchAdvances/npaMar26,
    the same figure dashboardCornerStats() above already shows in
-   miniature), and a placeholder for the branch's target ahead of the
-   NEXT fiscal year-end (March 2027) -- not yet available anywhere in this
-   app's data, shown honestly as "Not set" rather than guessed. These are
+   miniature), and the branch's own FY-end NPA target -- now a real figure
+   once NPA-DASHBOARD's "Branch/Region NPA Target" upload has been
+   Published (DATA.branchTargets, same shared cross-origin data this
+   portal already reads everything else from), shown as "Not set yet"
+   only when that upload genuinely hasn't happened for this branch. The
+   final month in the uploaded target series is used (not hardcoded to
+   "March 2027") so a future fiscal year's re-upload with a different
+   final month still shows correctly with no code change here. These are
    all NPA-position figures, not slippage figures, so they belong here on
    the Dashboard rather than on the PNPA Slippage page (Alok's own
    correction, 2026-09-25 -- they had briefly been placed there instead). */
@@ -6123,10 +6134,16 @@ function dashboardNpaTargetStrip(branchName){
     ? (()=>{ const gap = todayNpa - adv.npaMar26; const improved = gap<=0;
         return `<div class="npa-target-tile"><span class="lbl">Gap from March 2026</span><span class="val" style="color:${improved?'var(--green)':'var(--red)'}">${improved?'▼':'▲'} ${fmtCr(Math.abs(gap))}</span></div>`; })()
     : `<div class="npa-target-tile"><span class="lbl">Gap from March 2026</span><span class="val muted">Baseline not uploaded</span></div>`;
+  const bTargets = solId && DATA.branchTargets && DATA.branchTargets.branches ? DATA.branchTargets.branches[String(solId)] : null;
+  const finalTarget = bTargets && bTargets.targets && bTargets.targets.length ? bTargets.targets[bTargets.targets.length-1] : null;
+  const targetTileHtml = (finalTarget && finalTarget.rupees!=null)
+    ? (()=>{ const gap = todayNpa - finalTarget.rupees; const improved = gap<=0;
+        return `<div class="npa-target-tile"><span class="lbl">Target for ${esc(finalTarget.label)}</span><span class="val">${fmtCr(finalTarget.rupees)}</span><span class="val-sub" style="color:${improved?'var(--green)':'var(--red)'}">${improved?'▼':'▲'} ${fmtCr(Math.abs(gap))}</span></div>`; })()
+    : `<div class="npa-target-tile"><span class="lbl">Target for March 2027</span><span class="val muted">Not set yet</span></div>`;
   return `<div class="npa-target-strip">
     <div class="npa-target-tile"><span class="lbl">Today's NPA</span><span class="val">${fmtCr(todayNpa)}</span></div>
     ${marGapHtml}
-    <div class="npa-target-tile"><span class="lbl">Target for March 2027</span><span class="val muted">Not set yet</span></div>
+    ${targetTileHtml}
   </div>`;
 }
 

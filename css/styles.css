@@ -2111,6 +2111,7 @@ html,body{overscroll-behavior:none}
 .npa-target-tile .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--sub);font-weight:800}
 .npa-target-tile .val{font-size:17px;font-weight:800;color:var(--ink)}
 .npa-target-tile .val.muted{font-size:12.5px;font-weight:700;color:var(--ink-mute)}
+.npa-target-tile .val-sub{font-size:11.5px;font-weight:700}
 
 /* ---------- Recovery Dashboard (branch portal): PNPA Slippage ---------- */
 .pnpa-today-hero{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-md);padding:16px 16px 14px;margin-bottom:16px}
