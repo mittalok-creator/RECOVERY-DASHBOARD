@@ -7519,6 +7519,22 @@ function renderKccOverdueBody(){
     ${amountFilterRow}`;
 
   const filteredRows = kccovFilteredRows(d);
+  // Average Ticket Size -- Alok's request: shown in every KCC Overdue view
+  // (not just Branch Summary/Calendar's own scheme-tab row) and reacting to
+  // every filter (Branch lock/F.Y./Address/date/Balance Amount), same as
+  // NPA-DASHBOARD's identical addition. Built straight off filteredRows --
+  // the shared, already-fully-filtered set every view below reads from --
+  // so clicking e.g. the >=5L Balance Amount chip updates this figure to
+  // that bucket's own average exactly the same way it updates every
+  // table/total on the page, with no separate wiring.
+  const atsCount = filteredRows.length;
+  const atsOS = filteredRows.reduce((a,r)=>a+(r[KC.OS]||0),0);
+  const avgTicket = atsCount>0 ? atsOS/atsCount : 0;
+  const avgTicketRow = `<div class="hero-kpi-row" style="grid-template-columns:1fr;max-width:300px;margin-bottom:16px">
+    ${heroKpiCard({id:'kccovAvgTicket', icon:ICON_TICKET, tint:'var(--amber-soft)', color:'var(--amber)',
+      label:'Average Ticket Size', fallback: atsCount>0?fmtINR2(avgTicket):'—',
+      sub:`${atsCount.toLocaleString('en-IN')} account${atsCount!==1?'s':''} in current filter`})}
+  </div>`;
   // The hero scheme-tab row and its bucketTotals are only meaningful for
   // Branch Summary/Calendar -- the 3 bifurcation views (F.Y./Month
   // Summary, Branch Report, All Branches Overview) exist specifically to
@@ -7578,7 +7594,7 @@ function renderKccOverdueBody(){
            <button type="button" class="export-xl-btn" onclick="exportKccOverdueBifurcationPdf('${kccovView}')">Save as PDF</button>` : '')
       : '';
 
-  el.innerHTML = toolbar + heroRow + viewToggleRow +
+  el.innerHTML = toolbar + avgTicketRow + heroRow + viewToggleRow +
     (kccovView==='calendar' ? `<div id="kccovInsightWrap"></div>` : '') +
     `<div class="chart-card" style="margin-top:16px">
       <div class="chart-card-head-row">
