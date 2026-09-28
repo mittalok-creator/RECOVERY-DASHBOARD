@@ -887,6 +887,84 @@ main{padding:20px 16px 40px}
 .info-grid .v{font-size:13.5px;font-weight:700;color:var(--ink);margin-top:3px;word-break:break-word}
 .linked-note{display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--sub);font-weight:600}
 
+/* ---------- Application Form screen redesign (2026-09-28) -- visual/
+   animation layer only, no input-field/output changes. Gives this one
+   screen its own distinct identity instead of inheriting the generic
+   .card riseIn look every other screen uses. Ported verbatim from
+   NPA-DASHBOARD's identical redesign. ---------- */
+@keyframes otsAppFadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+@keyframes otsAppPopIn{0%{opacity:0;transform:scale(.6)}70%{transform:scale(1.06)}100%{opacity:1;transform:scale(1)}}
+@keyframes otsAppSuccessPulse{0%{box-shadow:0 0 0 0 var(--accent-soft),0 6px 18px var(--accent-soft)}70%{box-shadow:0 0 0 14px rgba(0,0,0,0),0 6px 18px var(--accent-soft)}100%{box-shadow:0 0 0 0 rgba(0,0,0,0),0 6px 18px var(--accent-soft)}}
+@keyframes otsAppBadgeIn{from{opacity:0;transform:scale(.7)}to{opacity:1;transform:scale(1)}}
+
+.ots-app-steps{display:flex;align-items:flex-start;margin-bottom:18px;animation:otsAppFadeUp .4s var(--ease)}
+.ots-app-step{display:flex;flex-direction:column;align-items:center;gap:6px;flex:none;width:88px}
+.ots-app-step-dot{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:800;background:var(--card);border:2px solid var(--line);color:var(--sub);transition:background .35s var(--ease),border-color .35s var(--ease),color .35s var(--ease),transform .35s var(--ease)}
+.ots-app-step.active .ots-app-step-dot{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);transform:scale(1.1)}
+.ots-app-step.done .ots-app-step-dot{border-color:var(--green);color:#fff;background:var(--green)}
+.ots-app-step-label{font-size:9.5px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.4px;text-align:center;transition:color .3s var(--ease)}
+.ots-app-step.active .ots-app-step-label{color:var(--ink)}
+.ots-app-step-line{flex:1;height:2px;background:var(--line);margin:14px 4px 0;position:relative;overflow:hidden;min-width:20px;border-radius:2px}
+.ots-app-step-line::after{content:'';position:absolute;inset:0;background:var(--green);transform:scaleX(0);transform-origin:left;transition:transform .6s var(--ease)}
+.ots-app-step-line.filled::after{transform:scaleX(1)}
+
+.ots-app-search-card{animation:otsAppFadeUp .45s var(--ease)}
+.ots-app-search-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.ots-app-search-input-wrap{position:relative;flex:1;min-width:220px;border-radius:var(--radius-md);transition:box-shadow .2s var(--ease)}
+.ots-app-search-input-wrap:focus-within{box-shadow:0 0 0 4px var(--accent-soft)}
+.ots-app-search-icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--sub);pointer-events:none;transition:color .2s var(--ease)}
+.ots-app-search-input-wrap:focus-within .ots-app-search-icon{color:var(--accent)}
+.ots-app-search-input{padding-left:38px !important}
+
+.ots-app-btn-primary{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 20px;border-radius:10px;border:none;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;font:inherit;font-weight:800;font-size:13px;cursor:pointer;box-shadow:0 6px 18px var(--accent-soft);transition:transform .18s var(--ease),box-shadow .18s var(--ease),filter .18s var(--ease);white-space:nowrap}
+.ots-app-btn-primary:hover{transform:translateY(-1px);filter:brightness(1.06)}
+.ots-app-btn-primary:active{transform:translateY(0) scale(.98)}
+.ots-app-btn-primary.success{animation:otsAppSuccessPulse .6s var(--ease)}
+
+.ots-app-profile-card{animation:otsAppFadeUp .5s var(--ease) both}
+.ots-app-profile-head{display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap}
+.ots-app-avatar{flex:none;width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 6px 16px var(--accent-soft);animation:otsAppPopIn .5s var(--ease) .05s both}
+.ots-app-profile-name-txt{font-size:16px;font-weight:800;color:var(--ink);margin-bottom:6px}
+.ots-app-profile-badges{display:flex;gap:6px;flex-wrap:wrap}
+.ots-app-badge{font-size:10.5px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent);letter-spacing:.2px;animation:otsAppBadgeIn .35s var(--ease) .15s both}
+.ots-app-badge.alt{background:var(--card);border:1px solid var(--line);color:var(--sub)}
+.ots-app-profile-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+.ots-app-stat{display:flex;flex-direction:column;gap:3px;animation:otsAppFadeUp .4s var(--ease) .1s both}
+.ots-app-stat .lbl{font-size:9.5px;text-transform:uppercase;color:var(--sub);font-weight:700;letter-spacing:.6px}
+.ots-app-stat .v{font-size:15px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+.ots-app-stat.highlight .v{color:var(--accent)}
+.ots-app-stat .sub{font-size:10.5px;color:var(--sub);font-weight:600}
+
+.ots-app-fields-card{animation:otsAppFadeUp .5s var(--ease) .08s both}
+.ots-app-fields-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+.ots-app-field-label{display:block;font-size:12px;font-weight:700;color:var(--sub);margin-bottom:6px}
+.ots-app-field-label .req{color:#d1425a}
+.ots-app-field-input-wrap{position:relative;border-radius:var(--radius-md);transition:box-shadow .2s var(--ease)}
+.ots-app-field-input-wrap:focus-within{box-shadow:0 0 0 4px var(--accent-soft)}
+.ots-app-field-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--sub);font-weight:800;font-size:13px;pointer-events:none;transition:color .2s var(--ease);display:flex;align-items:center}
+.ots-app-field-input-wrap:focus-within .ots-app-field-icon{color:var(--accent)}
+.ots-app-field-input{width:100%;min-width:0;padding-left:30px !important}
+.ots-app-field-hint{font-size:11px;color:var(--sub);margin-top:5px}
+
+.ots-app-letter-frame{animation:otsAppFadeUp .5s var(--ease) both}
+.ots-app-letter-frame-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.ots-app-letter-frame-title{font-weight:800}
+.ots-app-ready-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#fff;background:var(--green);padding:4px 11px;border-radius:999px;animation:otsAppBadgeIn .4s var(--ease) .1s both}
+.ots-app-letter-paper{overflow-x:auto;border-radius:12px;box-shadow:0 14px 34px rgba(0,0,0,.16);animation:otsAppPopIn .5s var(--ease) .1s both}
+.ots-app-letter-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.ots-app-btn-pill{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 16px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-weight:700;font-size:12px;cursor:pointer;transition:transform .18s var(--ease),box-shadow .18s var(--ease),background .18s var(--ease);white-space:nowrap}
+.ots-app-btn-pill:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.12)}
+.ots-app-btn-pill:active{transform:translateY(0) scale(.98)}
+.ots-app-btn-pill.accent{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;border-color:transparent}
+
+@media (prefers-reduced-motion: reduce){
+  .ots-app-steps,.ots-app-search-card,.ots-app-profile-card,.ots-app-avatar,.ots-app-badge,.ots-app-stat,
+  .ots-app-fields-card,.ots-app-letter-frame,.ots-app-ready-badge,.ots-app-letter-paper,.ots-app-btn-primary.success{
+    animation:none!important;
+  }
+  .ots-app-step-dot,.ots-app-step-label,.ots-app-step-line::after{transition:none!important}
+}
+
 /* Branch profile card at the top of the Dashboard when a single branch is
    selected -- reuses .card/.info-grid/.bname/.baddr from the borrower card
    above so it reads as the same "detail summary" pattern, not a new one. */

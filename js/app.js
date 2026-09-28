@@ -583,16 +583,22 @@ function otsAppReadSettlementFields(){
 function otsAppRenderPreview(){
   const wrap = document.getElementById('otsAppPreviewWrap');
   if(!wrap || !__otsAppLetterHtml) return;
-  wrap.innerHTML = '<div class="card">'
-    + '<div style="font-weight:800;margin-bottom:10px;">Generated Application Form</div>'
-    + '<div style="overflow-x:auto;border:1px solid var(--line);border-radius:10px;">' + __otsAppLetterHtml + '</div>'
-    + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">'
-    +   '<button type="button" class="export-xl-btn" onclick="otsAppPrint()">🖨 Print</button>'
-    +   '<button type="button" class="export-xl-btn" onclick="otsAppSavePdf()">⬇ Save as PDF</button>'
-    +   '<button type="button" class="export-xl-btn" onclick="otsAppSharePdf()">📤 Share on WhatsApp</button>'
+  wrap.innerHTML = '<div class="card ots-app-letter-frame">'
+    + '<div class="ots-app-letter-frame-head">'
+    +   '<div class="ots-app-letter-frame-title">Generated Application Form</div>'
+    +   '<div class="ots-app-ready-badge"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Ready</div>'
+    + '</div>'
+    + '<div class="ots-app-letter-paper">' + __otsAppLetterHtml + '</div>'
+    + '<div class="ots-app-letter-actions">'
+    +   '<button type="button" class="ots-app-btn-pill" onclick="otsAppPrint()">🖨 <span>Print</span></button>'
+    +   '<button type="button" class="ots-app-btn-pill" onclick="otsAppSavePdf()">⬇ <span>Save as PDF</span></button>'
+    +   '<button type="button" class="ots-app-btn-pill accent" onclick="otsAppSharePdf()">📤 <span>Share on WhatsApp</span></button>'
     + '</div>'
     + '</div>';
   wrap.scrollIntoView({behavior:'smooth', block:'start'});
+  const genBtn = document.getElementById('otsAppGenerateBtn');
+  if(genBtn){ genBtn.classList.remove('success'); void genBtn.offsetWidth; genBtn.classList.add('success'); }
+  otsAppSetStep('ready');
 }
 function otsAppGenerate(){
   if(__otsAppManualMode){ otsAppGenerateManual(); return; }
@@ -720,44 +726,125 @@ async function otsAppSharePdf(){
   }
 }
 window.otsAppSharePdf = otsAppSharePdf;
+/* ==================================================================
+   Application Form screen redesign (Alok's request, 2026-09-28: "output
+   same rahega and input fields bhi same hi rahenge, isko ui kuch achha
+   unique animated design kar k do"). Visual/animation layer ONLY --
+   every input field keeps its exact original id/type/validation, and
+   buildOtsApplicationFormHTML()'s own returned HTML (the actual Hindi
+   letter) is inserted completely unchanged, just inside a nicer frame.
+   A persistent 3-step indicator (Find Account -> Settlement Details ->
+   Application Ready) is built ONCE by renderOtsApplicationView() and
+   only ever updated via otsAppSetStep() (class toggles on existing DOM
+   nodes, never innerHTML-replaced) so the dot/connector-line transitions
+   actually animate between states instead of jump-cutting. Ported
+   verbatim from NPA-DASHBOARD's identical redesign, except this app's
+   extra manual-entry fallback path also reaches 'details'/'ready' (no
+   separate step variant -- the user still went through Find first, it
+   just didn't match, so the same 3 steps describe this path too). */
+function otsAppStepIndicatorHtml(){
+  const steps = [
+    {id:'find', label:'Find Account'},
+    {id:'details', label:'Settlement Details'},
+    {id:'ready', label:'Application Ready'},
+  ];
+  return '<div class="ots-app-steps" id="otsAppSteps">' + steps.map((s,i)=>{
+    const connector = i<steps.length-1 ? '<div class="ots-app-step-line"></div>' : '';
+    return '<div class="ots-app-step" data-step="' + s.id + '">'
+      + '<div class="ots-app-step-dot">' + (i+1) + '</div>'
+      + '<div class="ots-app-step-label">' + esc(s.label) + '</div>'
+      + '</div>' + connector;
+  }).join('') + '</div>';
+}
+function otsAppSetStep(step){
+  const order = {find:0, details:1, ready:2};
+  const cur = order[step]!=null ? order[step] : 0;
+  const root = document.getElementById('otsAppSteps');
+  if(!root) return;
+  root.querySelectorAll('.ots-app-step').forEach((elm,i)=>{
+    elm.classList.toggle('done', i<cur);
+    elm.classList.toggle('active', i===cur);
+    const dot = elm.querySelector('.ots-app-step-dot');
+    if(dot) dot.innerHTML = i<cur ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>' : String(i+1);
+  });
+  root.querySelectorAll('.ots-app-step-line').forEach((elm,i)=>{ elm.classList.toggle('filled', i<cur); });
+}
+function otsAppInitials(name){
+  const parts = String(name||'').trim().split(/\s+/).filter(Boolean);
+  if(!parts.length) return '—';
+  return (parts[0][0] + (parts.length>1 ? parts[parts.length-1][0] : '')).toUpperCase();
+}
+// Animates el's text from 0 to `target`, formatted by fmtFn at every
+// frame -- settles on fmtFn(target) exactly, and skips straight to it
+// when the viewer has prefers-reduced-motion set.
+function otsAppAnimateCountUp(el, target, fmtFn){
+  if(!el) return;
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(reduce || !isFinite(target)){ el.textContent = fmtFn(target); return; }
+  const duration = 700, start = performance.now();
+  function tick(now){
+    const p = Math.min(1, (now-start)/duration);
+    const eased = 1 - Math.pow(1-p, 3);
+    el.textContent = fmtFn(target*eased);
+    if(p<1) requestAnimationFrame(tick); else el.textContent = fmtFn(target);
+  }
+  requestAnimationFrame(tick);
+}
 // Shared by both the auto-fill card (below) and the manual-entry card --
 // the 5 fields that are ALWAYS typed by hand, in either mode. hintHtml is
 // the small note under Outstanding; only the auto-fill path has a ledger
 // figure to reference, so the manual path passes ''.
 function otsAppSettlementFieldsCardHtml(hintHtml){
-  return '<div class="card">'
+  return '<div class="card ots-app-fields-card">'
     + '<div style="font-weight:800;margin-bottom:12px;">Please enter these details</div>'
-    + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;">'
-    +   '<div><label style="display:block;font-size:12px;font-weight:700;color:var(--sub);margin-bottom:5px;">Outstanding as on Date of OTS <span style="color:#d1425a;">*</span></label>'
-    +   '<input type="text" inputmode="decimal" id="otsAppOutstanding" class="dash-select" style="width:100%;min-width:0" placeholder="e.g. 245000">'
-    +   (hintHtml ? ('<div style="font-size:11px;color:var(--sub);margin-top:4px;">' + hintHtml + '</div>') : '')
+    + '<div class="ots-app-fields-grid">'
+    +   '<div class="ots-app-field">'
+    +     '<label class="ots-app-field-label">Outstanding as on Date of OTS <span class="req">*</span></label>'
+    +     '<div class="ots-app-field-input-wrap"><span class="ots-app-field-icon">₹</span>'
+    +       '<input type="text" inputmode="decimal" id="otsAppOutstanding" class="dash-select ots-app-field-input" placeholder="e.g. 245000"></div>'
+    +     (hintHtml ? ('<div class="ots-app-field-hint">' + hintHtml + '</div>') : '')
+    +   '</div>'
+    +   '<div class="ots-app-field">'
+    +     '<label class="ots-app-field-label">Purpose of Loan</label>'
+    +     '<div class="ots-app-field-input-wrap"><span class="ots-app-field-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>'
+    +       '<input type="text" id="otsAppPurpose" class="dash-select ots-app-field-input" placeholder="e.g. पशुपालन हेतु"></div>'
+    +   '</div>'
+    +   '<div class="ots-app-field">'
+    +     '<label class="ots-app-field-label">OTS / Compromise Amount</label>'
+    +     '<div class="ots-app-field-input-wrap"><span class="ots-app-field-icon">₹</span>'
+    +       '<input type="text" inputmode="decimal" id="otsAppOtsAmt" class="dash-select ots-app-field-input" placeholder="e.g. 140000"></div>'
+    +   '</div>'
+    +   '<div class="ots-app-field">'
+    +     '<label class="ots-app-field-label">Token Amount</label>'
+    +     '<div class="ots-app-field-input-wrap"><span class="ots-app-field-icon">₹</span>'
+    +       '<input type="text" inputmode="decimal" id="otsAppTokenAmt" class="dash-select ots-app-field-input" placeholder="e.g. 25000"></div>'
+    +   '</div>'
+    +   '<div class="ots-app-field">'
+    +     '<label class="ots-app-field-label">Token Date</label>'
+    +     '<input type="date" id="otsAppTokenDate" class="dash-select" style="width:100%;min-width:0">'
+    +   '</div>'
     + '</div>'
-    +   '<div><label style="display:block;font-size:12px;font-weight:700;color:var(--sub);margin-bottom:5px;">Purpose of Loan</label>'
-    +   '<input type="text" id="otsAppPurpose" class="dash-select" style="width:100%;min-width:0" placeholder="e.g. पशुपालन हेतु"></div>'
-    +   '<div><label style="display:block;font-size:12px;font-weight:700;color:var(--sub);margin-bottom:5px;">OTS / Compromise Amount</label>'
-    +   '<input type="text" inputmode="decimal" id="otsAppOtsAmt" class="dash-select" style="width:100%;min-width:0" placeholder="e.g. 140000"></div>'
-    +   '<div><label style="display:block;font-size:12px;font-weight:700;color:var(--sub);margin-bottom:5px;">Token Amount</label>'
-    +   '<input type="text" inputmode="decimal" id="otsAppTokenAmt" class="dash-select" style="width:100%;min-width:0" placeholder="e.g. 25000"></div>'
-    +   '<div><label style="display:block;font-size:12px;font-weight:700;color:var(--sub);margin-bottom:5px;">Token Date</label>'
-    +   '<input type="date" id="otsAppTokenDate" class="dash-select" style="width:100%;min-width:0"></div>'
-    + '</div>'
-    + '<div style="margin-top:16px;">'
-    +   '<button type="button" class="export-xl-btn" onclick="otsAppGenerate()">✓ Generate Application Form</button>'
+    + '<div style="margin-top:18px;">'
+    +   '<button type="button" class="ots-app-btn-primary" id="otsAppGenerateBtn" onclick="otsAppGenerate()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Generate Application Form</button>'
     + '</div>'
     + '</div>';
 }
 function otsAppManualField(id, label, type, placeholder, required){
-  return '<div><label style="display:block;font-size:12px;font-weight:700;color:var(--sub);margin-bottom:5px;">' + esc(label) + (required?' <span style="color:#d1425a;">*</span>':'') + '</label>'
-    + '<input type="' + type + '" id="' + id + '" class="dash-select" style="width:100%;min-width:0"'
-    + (placeholder?(' placeholder="'+esc(placeholder)+'"'):'')
-    + (id==='otsAppManualSolId'?' oninput="otsAppManualSolIdChanged()"':'')
-    + '></div>';
+  return '<div class="ots-app-field">'
+    + '<label class="ots-app-field-label">' + esc(label) + (required?' <span class="req">*</span>':'') + '</label>'
+    + '<div class="ots-app-field-input-wrap">'
+    +   '<input type="' + type + '" id="' + id + '" class="dash-select" style="width:100%;min-width:0"'
+    +   (placeholder?(' placeholder="'+esc(placeholder)+'"'):'')
+    +   (id==='otsAppManualSolId'?' oninput="otsAppManualSolIdChanged()"':'')
+    +   '>'
+    + '</div>'
+    + '</div>';
 }
 function otsAppManualFormHtml(){
-  return '<div class="card">'
+  return '<div class="card ots-app-fields-card">'
     + '<div style="font-weight:800;margin-bottom:4px;">Enter Account Details Manually</div>'
     + '<div style="font-size:12px;color:var(--sub);margin-bottom:12px;">This account was not found in the loaded NPA data — fill in these details yourself to still generate the Application Form.</div>'
-    + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;">'
+    + '<div class="ots-app-fields-grid">'
     +   otsAppManualField('otsAppManualName','Name','text','',true)
     +   otsAppManualField('otsAppManualAcctNo','Account No.','text','',true)
     +   otsAppManualField('otsAppManualSolId','Sol ID','text','e.g. 9270',false)
@@ -775,33 +862,46 @@ function otsAppManualFormHtml(){
 function renderOtsApplicationDetail(){
   const wrap = document.getElementById('otsAppDetail');
   if(!wrap) return;
-  if(__otsAppManualMode){ wrap.innerHTML = otsAppManualFormHtml(); return; }
+  if(__otsAppManualMode){ wrap.innerHTML = otsAppManualFormHtml(); otsAppSetStep('details'); return; }
   const row = __otsAppRow;
-  if(!row){ wrap.innerHTML = ''; return; }
+  if(!row){ wrap.innerHTML = ''; otsAppSetStep('find'); return; }
   const meta = BRANCH_META[Number(row[C.SOL_ID])] || {};
   const acctOpenDate = toDate(row[C.OPN_DT]);
-  wrap.innerHTML = '<div class="card">'
-    + '<div style="font-weight:800;margin-bottom:4px;">Account Details (Auto-Filled from Records)</div>'
-    + '<div class="info-grid">'
-    +   '<div><div class="k">Name</div><div class="v">' + (esc(row[C.NAME])||'—') + '</div></div>'
-    +   '<div><div class="k">Account No.</div><div class="v">' + (esc(row[C.ACCT_NO])||'—') + '</div></div>'
-    +   '<div><div class="k">Branch</div><div class="v">' + (esc(row[C.SOL_DESC])||'—') + ' (' + (esc(row[C.SOL_ID])||'—') + ')</div></div>'
-    +   '<div><div class="k">District</div><div class="v">' + (esc(meta.district)||'—') + '</div></div>'
-    +   '<div><div class="k">Mobile No.</div><div class="v">' + (esc(row[C.PHONE])||'—') + '</div></div>'
-    +   '<div><div class="k">Loan Amount / Date</div><div class="v">' + fmtINR2(Number(row[C.SANCT_LIM])||0) + ' · ' + fmtDate(acctOpenDate) + '</div></div>'
-    +   '<div><div class="k">Outstanding (as per records)</div><div class="v">' + fmtINR2(Number(row[C.OUTBAL])||0) + '</div></div>'
+  const loanAmt = Number(row[C.SANCT_LIM])||0;
+  const outstandingAmt = Number(row[C.OUTBAL])||0;
+  wrap.innerHTML = '<div class="card ots-app-profile-card">'
+    + '<div class="ots-app-profile-head">'
+    +   '<div class="ots-app-avatar">' + esc(otsAppInitials(row[C.NAME])) + '</div>'
+    +   '<div>'
+    +     '<div class="ots-app-profile-name-txt">' + (esc(row[C.NAME])||'—') + '</div>'
+    +     '<div class="ots-app-profile-badges">'
+    +       '<span class="ots-app-badge">' + (esc(row[C.SOL_DESC])||'—') + ' (' + (esc(row[C.SOL_ID])||'—') + ')</span>'
+    +       (meta.district ? '<span class="ots-app-badge alt">' + esc(meta.district) + '</span>' : '')
+    +     '</div>'
+    +   '</div>'
+    + '</div>'
+    + '<div class="ots-app-profile-stats">'
+    +   '<div class="ots-app-stat"><span class="lbl">Account No.</span><span class="v">' + (esc(row[C.ACCT_NO])||'—') + '</span></div>'
+    +   '<div class="ots-app-stat"><span class="lbl">Mobile No.</span><span class="v">' + (esc(row[C.PHONE])||'—') + '</span></div>'
+    +   '<div class="ots-app-stat"><span class="lbl">Loan Amount</span><span class="v" id="otsAppLoanAmtStat">₹0.00</span><span class="sub">since ' + fmtDate(acctOpenDate) + '</span></div>'
+    +   '<div class="ots-app-stat highlight"><span class="lbl">Outstanding (as per records)</span><span class="v" id="otsAppOutstandingStat">₹0.00</span></div>'
     + '</div>'
     + '</div>'
-    + otsAppSettlementFieldsCardHtml('Records show ' + fmtINR2(Number(row[C.OUTBAL])||0) + ' — enter the actual figure as on the settlement date.')
+    + otsAppSettlementFieldsCardHtml('Records show ' + fmtINR2(outstandingAmt) + ' — enter the actual figure as on the settlement date.')
     + '<div id="otsAppPreviewWrap"></div>';
+  otsAppAnimateCountUp(document.getElementById('otsAppLoanAmtStat'), loanAmt, fmtINR2);
+  otsAppAnimateCountUp(document.getElementById('otsAppOutstandingStat'), outstandingAmt, fmtINR2);
+  otsAppSetStep('details');
 }
 function renderOtsApplicationView(){
   const el = document.getElementById('otsApplicationArea');
   if(!el || el.dataset.wired) return;
-  el.innerHTML = '<div class="card">'
-    + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">'
-    +   '<input type="text" id="otsAppSearchInput" class="dash-select" style="flex:1;min-width:220px" placeholder="Account No. or Customer Name" onkeydown="if(event.key===\'Enter\'){otsAppSearch();}">'
-    +   '<button type="button" class="export-xl-btn" onclick="otsAppSearch()">Find</button>'
+  el.innerHTML = otsAppStepIndicatorHtml()
+    + '<div class="card ots-app-search-card">'
+    + '<div class="ots-app-search-row">'
+    +   '<div class="ots-app-search-input-wrap"><svg class="ots-app-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
+    +     '<input type="text" id="otsAppSearchInput" class="dash-select ots-app-search-input" style="width:100%;min-width:0" placeholder="Account No. or Customer Name" onkeydown="if(event.key===\'Enter\'){otsAppSearch();}"></div>'
+    +   '<button type="button" class="ots-app-btn-primary" onclick="otsAppSearch()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Find</button>'
     + '</div>'
     + '<div id="otsAppSearchStatus"></div>'
     + '</div>'
