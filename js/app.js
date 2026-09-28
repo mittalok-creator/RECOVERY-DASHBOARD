@@ -2781,6 +2781,12 @@ function closeDetail(){
   document.getElementById('railRight').classList.remove('show');
   document.getElementById('eligibleBanner').classList.remove('show');
   document.getElementById('specialNoteBanner')?.classList.remove('show');
+  // Undoes showNpaAccountDetail()'s own direct .active toggle on the
+  // "search" view (see its comment) -- this portal has no real search
+  // screen to show, so closing just hides that section again, uncovering
+  // whichever view was already active underneath (Dashboard, KCC Overdue,
+  // ...), never leaving the user on a blank/unreachable "search" screen.
+  document.querySelector('.view[data-view="search"]')?.classList.remove('active');
   /* Coming back from a borrower, the start screen behind it is stale -- the
      visit just entered Recently Opened, and any OTS Amount typed changes
      both that row and the worksheet bar's totals. Only redrawn when the
@@ -5535,36 +5541,175 @@ function cmdkGroupLabelHtml(source){
   return `<div class="cmdk-group-label"><span class="cmdk-group-dot" style="background:${dotColor}"></span>${esc(label)}</div>`;
 }
 function setCmdkActive(idx){ cmdkActive=idx; cmdkResults.querySelectorAll('.cmdk-item').forEach(it=>it.classList.toggle('active',+it.dataset.idx===idx)); }
-/* NPA results link to the real OTS settlement detail (openDetail); KCC
-   Overdue/PNPA rows have no customer ID or the fuller record that detail
-   view needs (confirmed separate datasets, not just a filtered view of
-   the same one), so they open a small read-only info card instead. */
+/* NPA results open the read-only Particulars detail (showNpaAccountDetail,
+   below showQuickAcctDetail's isNpa branch); KCC Overdue/PNPA rows have no
+   customer ID or the fuller record that view needs (confirmed separate
+   datasets, not just a filtered view of the same one), so they open a
+   small read-only info card instead. */
 function pickCmdk(idx){
   const m=cmdkMatches[idx]; if(!m) return;
   closeCmdk();
   showQuickAcctDetail(m.source, m.row);
 }
+
+/* Read-only NPA account Particulars table -- Alok's request, 2026-09-28:
+   "itna hi data jitna maine screenshot main diya hai provision tak" (only
+   this much data, as in my screenshot, up to Provision). Modeled directly
+   on the OTS Calculator's own loanTableHTML() (same Loan Terms group,
+   same Dues & Provisioning group up to and including Provision) but with
+   every settlement-specific row left out: no Interest-Reversal input (a
+   plain value here, not editable -- nothing to override against since
+   there's no settlement flow), no Total P&L, no Settlement & Impact group
+   (Lok Adalat floor, OTS Amount input, Settlement Progress bar), no
+   eligibility warning row -- all of those exist only in service of the
+   OTS Calculator this portal deliberately doesn't have. */
+function npaParticularsTableHTML(slots){
+  const cols = slots.map(s=>`
+    <th scope="col">
+      <div class="lt-acc">A/c · ${esc(s.acctNo)}</div>
+      <div class="lt-scheme">${esc(s.scheme)||''}</div>
+      ${s.assetCode?`<span class="badge-pill ${esc(s.assetCode)}" title="${esc(assetLabel(s.assetCode))}">${esc(s.assetCode)}</span>`:''}
+    </th>`).join('');
+  const group = (label, icon) => `<tr class="lt-group"><th scope="row" class="lt-label">${ltIcon(icon)}<span class="lt-label-text"><span class="lt-label-inner">${label}</span></span></th>${slots.map(()=>'<td></td>').join('')}</tr>`;
+  const row = (label, icon, fn, cls='') => `<tr class="${cls}"><th scope="row" class="lt-label">${ltIconBadge(icon)}<span class="lt-label-text"><span class="lt-label-inner">${label}</span></span></th>${slots.map(s=>`<td>${fn(s)}</td>`).join('')}</tr>`;
+  return `
+  <div class="loan-table-wrap">
+  <table class="loan-table">
+    <thead><tr><th scope="col" class="lt-label">${ltIcon('list')}<span class="lt-label-text"><span class="lt-label-inner">Particulars</span></span></th>${cols}</tr></thead>
+    <tbody>
+      ${group('Loan Terms', 'loanTerms')}
+      ${row('Sanction Date', 'calendar', s=>fmtDate(toDate(s.sanctionDate)))}
+      ${row('Sanction Limit', 'doc', s=>fmtINR2(s.sanctionLimit))}
+      ${row('NPA Date', 'warn', s=>fmtDate(toDate(s.npaDate)))}
+      ${row('O/S Balance', 'coin', s=>fmtINR2(s.os), 'lt-strong')}
+      ${group('Dues &amp; Provisioning', 'dues')}
+      ${row('Interest Reversal', 'rotate', s=>fmtINR2(s.uri))}
+      ${row(uciLabelWithTenure(slots), 'percent', s=>fmtINR2(s.uci))}
+      ${row('Total Dues', 'layers', s=>fmtINR2(s.totalDues), 'lt-strong')}
+      ${row('Total Contractual Dues', 'layers', s=>fmtINR2(s.totalContractualDues), 'lt-strong')}
+      ${row('Provision', 'shield', s=>fmtINR2(s.provision), 'lt-divider')}
+    </tbody>
+  </table>
+  </div>`;
+}
+function drawNpaDetailBody(custRow, slots, prevOts){
+  const body = document.getElementById('detailBody');
+  body.innerHTML = `
+    <div class="card borrower-card">
+      <div class="bcard-top">
+        <div class="bavatar" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20c1.6-3.6 4.8-5.5 7.5-5.5s5.9 1.9 7.5 5.5"/></svg></div>
+        <div class="bcard-title-col">
+          <div class="bname">${esc(custRow[C.NAME])||'—'}</div>
+          <div class="baddr">${esc(custRow[C.ADDR])||'—'}</div>
+        </div>
+        <div class="bcard-branch">${esc(custRow[C.SOL_DESC])||'—'}</div>
+      </div>
+      <div class="info-grid">
+        <div><div class="k">Cust ID</div><div class="v">${esc(custRow[C.CUST_ID])||'—'}</div></div>
+        <div><div class="k">Sol ID</div><div class="v">${esc(custRow[C.SOL_ID])||'—'}</div></div>
+        <div><div class="k">Mobile</div><div class="v">${esc(custRow[C.PHONE])||'—'}</div></div>
+        <div><div class="k">Aadhar</div><div class="v">${esc(custRow[C.AADHAR])||'—'}</div></div>
+        <div><div class="k">PAN</div><div class="v">${esc(custRow[C.PAN])||'—'}</div></div>
+        <div><div class="k">Branch</div><div class="v">${esc(custRow[C.SOL_DESC])||'—'}</div></div>
+        <div><div class="k">SB A/C</div><div class="v">${esc(custRow[C.SB_ACCT])||'—'}</div></div>
+        <div><div class="k">SB Balance</div><div class="v">${fmtINR2(custRow[C.SB_BAL]===''?0:custRow[C.SB_BAL])}</div></div>
+      </div>
+      ${prevOts?`<div class="linked-note">⏱ Previous OTS on record: ${esc(prevOts.date)} — ${esc(prevOts.amount)}</div>`:''}
+      <div class="linked-note">🔗 ${slots.length} loan account${slots.length>1?'s':''} linked</div>
+    </div>
+
+    <div class="loans-col">
+    <div class="section-label">Loan Accounts</div>
+    <div class="section-sub">All accounts side-by-side</div>
+
+    ${npaParticularsTableHTML(slots)}
+  </div>
+  `;
+  const tableWrap = body.querySelector('.loan-table-wrap');
+  if(tableWrap){
+    const updateFade = () => tableWrap.classList.toggle('at-end', tableWrap.scrollLeft + tableWrap.clientWidth >= tableWrap.scrollWidth - 4);
+    tableWrap.addEventListener('scroll', updateFade);
+    updateFade();
+  }
+}
+// Full-screen read-only NPA account detail -- opened for every NPA source
+// (Dashboard's account/customer list rows via showNpaQuickDetail, Cmd+K's
+// npa branch, and any other caller of showQuickAcctDetail('npa', row) --
+// all funnel in here via that function's isNpa branch below).
+function showNpaAccountDetail(custId){
+  const custRow = byCustId.get(String(custId));
+  if(!custRow) return;
+  const slots = [1,2,3,4].map(n=>{
+    const s = lookupLoanSlot(custId, n);
+    return s ? computeSlot(s) : null;
+  }).filter(Boolean);
+  if(!slots.length) return;
+  const prevOts = oldOtsByAcct.get(String(custRow[C.ACCT_NO]));
+  rememberBorrower(custRow);
+  // #detailPane is nested inside the (nav-hidden but still present)
+  // data-view="search" section -- .view{display:none} hides its whole
+  // subtree, position:fixed or not, until that section has .active
+  // (Playwright caught this: classList had "open" and innerHTML was
+  // populated, but the pane's own getBoundingClientRect() was 0x0 --
+  // invisible on a real screen too, not just a headless-browser quirk).
+  // Deliberately NOT calling switchView('search') to get that .active --
+  // switchView() deactivates every other .view first, and since #detailPane
+  // is an opaque position:fixed;inset:0 overlay it doesn't need that: it
+  // already covers the whole screen regardless of what's active behind it.
+  // Toggling .active directly here, and only removing it again in
+  // closeDetail() below, means whatever view (Dashboard, KCC Overdue, ...)
+  // was open before stays active underneath and is what the user lands
+  // back on -- not the real "search"/OTS Calculator screen, which this
+  // portal deliberately has no nav item for.
+  document.querySelector('.view[data-view="search"]')?.classList.add('active');
+
+  const pane = document.getElementById('detailPane');
+  document.getElementById('shell').classList.add('detail-active');
+  pane.classList.add('open');
+  pane.innerHTML = `
+    <div class="detail-head">
+      <div class="detail-headrow">
+        <button class="back-btn" onclick="closeDetail()" aria-label="Back to search results">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <div class="detail-headtext">
+          <h2>${esc(custRow[C.NAME])||'—'}</h2>
+          <p>${esc(custRow[C.SOL_DESC])||''} · Cust ID ${esc(custRow[C.CUST_ID])}</p>
+        </div>
+      </div>
+    </div>
+    <div class="detail-inner">
+      <div id="detailBody" style="padding-top:14px"></div>
+    </div>
+  `;
+  drawNpaDetailBody(custRow, slots, prevOts);
+  pane.scrollTop = 0;
+}
+window.showNpaAccountDetail = showNpaAccountDetail;
 /* Recovery Dashboard (branch portal) has no OTS Calculator at all -- an
    'npa' source used to route to openDetail() (the settlement screen) on
-   the production site; here it renders the same read-only field-grid card
-   as KCC Overdue/PNPA instead, via a new isNpa branch below. openDetail()
-   itself (and the whole settlement-calculation code block it depends on)
-   is left in this file, dormant/unreachable, rather than deleted -- safer
-   than a large deletion pass on a copy of a production-adjacent codebase;
-   nothing in this portal's UI calls it. */
+   the production site; here it instead opens showNpaAccountDetail() (a
+   read-only Particulars view -- Loan Terms + Dues & Provisioning, up to
+   Provision, every linked loan account side-by-side -- Alok's request,
+   2026-09-28: "itna hi data jitna maine screenshot main diya hai
+   provision tak"). KCC Overdue/PNPA rows still get the small read-only
+   field-grid card below, since neither has a customer ID or the fuller
+   per-loan-account record the Particulars view needs. openDetail() itself
+   (and the whole settlement-calculation code block it depends on) is left
+   in this file, dormant/unreachable, rather than deleted -- safer than a
+   large deletion pass on a copy of a production-adjacent codebase; nothing
+   in this portal's UI calls it. computeSlot()/lookupLoanSlot() (pure data
+   functions, no settlement side effects) are reused unchanged by
+   showNpaAccountDetail() below. */
 function showQuickAcctDetail(source, row){
   const isKcc = source==='kccov';
   const isNpa = source==='npa';
-  const title = isNpa ? row[C.NAME] : (isKcc ? row[KC.NAME] : row[PC.NAME]);
-  const branch = isNpa ? row[C.SOL_DESC] : (isKcc ? row[KC.BRANCH] : row[PC.BRANCH]);
-  const sourceLabel = isNpa ? 'NPA' : (isKcc ? 'KCC Overdue' : 'Daily PNPA');
+  if(isNpa){ showNpaAccountDetail(row[C.CUST_ID]); return; }
+  const title = isKcc ? row[KC.NAME] : row[PC.NAME];
+  const branch = isKcc ? row[KC.BRANCH] : row[PC.BRANCH];
+  const sourceLabel = isKcc ? 'KCC Overdue' : 'Daily PNPA';
   const sub = `${esc(branch)||'—'} · ${sourceLabel}`;
-  const fields = isNpa ? [
-    ['Account No', row[C.ACCT_NO]], ['Customer ID', row[C.CUST_ID]], ['Scheme', row[C.SCHEME]],
-    ['Outstanding', fmtINR2(row[C.OUTBAL])], ['Asset Class', row[C.SYS_SUBCLASS]||row[C.ASSET]],
-    ['Sanction Date', fmtDate(toDate(row[C.SANCT_DT]))], ['Sanction Limit', fmtINR2(row[C.SANCT_LIM])],
-    ['NPA Date', fmtDate(toDate(row[C.NPA_DT]))],
-  ] : isKcc ? [
+  const fields = isKcc ? [
     ['Account No', row[KC.ACCT]], ['Scheme', row[KC.SCHEME]], ['Outstanding', fmtINR2(row[KC.OS])],
     ['CADU', fmtINR2(row[KC.CADU])], ['Limit', fmtINR2(row[KC.LIMIT])], ['Cust NPA Date', row[KC.CUSTNPADATE]],
     ['F.Y.', row[KC.FY]], ['Category', row[KC.CATEGORY]], ['SMA', row[KC.SMA]], ['Reason', row[KC.REASON]],
