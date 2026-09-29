@@ -929,6 +929,12 @@ main{padding:20px 16px 40px}
 .ots-app-btn-primary:hover{transform:translateY(-1px);filter:brightness(1.06)}
 .ots-app-btn-primary:active{transform:translateY(0) scale(.98)}
 .ots-app-btn-primary.success{animation:otsAppSuccessPulse .6s var(--ease)}
+/* Full-width "Open Application Form" CTA at the bottom of the NPA account
+   Particulars page (Alok's request, 2026-09-29: "niche pura button banai
+   with name like submit button" -- a proper labeled button below the
+   table, not just the small header icon). Same look as every other
+   .ots-app-btn-primary, just stretched full-width and centered. */
+.npa-detail-appform-btn{width:100%;justify-content:center;height:44px;font-size:14px;margin-top:18px}
 
 .ots-app-profile-card{animation:otsAppFadeUp .5s var(--ease) both}
 .ots-app-profile-head{display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap}
@@ -2362,6 +2368,17 @@ table.pnpa-slip-table td:last-child{min-width:160px}
 @media (max-width:899px){
   #sideNav{display:none}
   #mainCol{padding-bottom:calc(84px + env(safe-area-inset-bottom));padding-top:56px}
+  /* Alok's report, 2026-09-29 (real device screenshot): "Generate
+     Application Form" was rendering right under the fixed .mobile-sig/
+     #bottomTabs bars, its text overlapping "Crafted by Alok Mittal" --
+     #mainCol's own 84px padding-bottom is the exact calculated minimum
+     (64px bar + ~20px signature strip) with no safety margin, and real
+     devices vary (address-bar show/hide, safe-area-inset-bottom reporting
+     differences) enough to eat into that margin. Extra breathing room on
+     this one card -- the last thing on both the real-match and manual-
+     entry Application Form paths, and the one button every visit to this
+     screen ends at -- rather than bumping every view's padding globally. */
+  .ots-app-fields-card{margin-bottom:32px}
   #mobileUtilBar{
     display:flex;align-items:center;justify-content:space-between;gap:10px;
     position:fixed;left:0;right:0;top:0;z-index:91;height:56px;padding:0 14px;
