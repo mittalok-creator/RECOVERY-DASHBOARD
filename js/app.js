@@ -5718,6 +5718,22 @@ function kccPnpaParticularsTableHTML(row, source){
   </table>
   </div>`;
 }
+// KCC Overdue's own "Cust NPA Date" is the date the account is due to be
+// classified NPA if not regularized (unlike PNPA's own same-named field,
+// which records a date already in the past -- see parsePnpaRows' comment
+// -- so this alert is KCC-only, never shown for PNPA). Alok's request,
+// 2026-09-29: show it big and red at the top of the account page with a
+// running day-count, not just as one more row in the Particulars table
+// below (which still keeps its own copy, unchanged).
+function kccNpaDaysRemainingLabel(dateStr){
+  const target = toDate(dateStr);
+  if(!target) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const days = daysBetween(target, today);
+  if(days > 0) return `${days.toLocaleString('en-IN')} day${days!==1?'s':''} remaining`;
+  if(days === 0) return 'Due today';
+  return `${Math.abs(days).toLocaleString('en-IN')} day${Math.abs(days)!==1?'s':''} overdue`;
+}
 function drawKccPnpaDetailBody(row, source){
   const isKcc = source==='kccov';
   const body = document.getElementById('detailBody');
@@ -5726,6 +5742,8 @@ function drawKccPnpaDetailBody(row, source){
   const acctNo = isKcc ? row[KC.ACCT] : row[PC.ACCT];
   const scheme = isKcc ? row[KC.SCHEME] : row[PC.SCHEME];
   const custId = isKcc ? row[KC.CUST_ID] : row[PC.CUST_ID];
+  const npaDateStr = isKcc ? row[KC.CUSTNPADATE] : '';
+  const npaDaysLabel = npaDateStr ? kccNpaDaysRemainingLabel(npaDateStr) : null;
   body.innerHTML = `
     <div class="card borrower-card">
       <div class="bcard-top">
@@ -5735,6 +5753,11 @@ function drawKccPnpaDetailBody(row, source){
         </div>
         <div class="bcard-branch">${esc(branch)||'—'}</div>
       </div>
+      ${npaDateStr?`<div class="kccov-npa-alert">
+        <div class="kccov-npa-alert-label">Cust NPA Date</div>
+        <div class="kccov-npa-alert-date">${esc(npaDateStr)}</div>
+        ${npaDaysLabel?`<div class="kccov-npa-alert-days">${esc(npaDaysLabel)}</div>`:''}
+      </div>`:''}
       <div class="info-grid">
         <div><div class="k">Account No</div><div class="v">${esc(acctNo)||'—'}</div></div>
         ${custId?`<div><div class="k">Cust ID</div><div class="v">${esc(custId)}</div></div>`:''}

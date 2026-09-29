@@ -886,6 +886,15 @@ main{padding:20px 16px 40px}
 .info-grid .k{font-size:9.5px;text-transform:uppercase;color:var(--sub);font-weight:700;letter-spacing:.7px}
 .info-grid .v{font-size:13.5px;font-weight:700;color:var(--ink);margin-top:3px;word-break:break-word}
 .linked-note{display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--sub);font-weight:600}
+/* KCC Overdue account page -- Cust NPA Date called out big and red, with a
+   running day-count, instead of being just one more row in the Particulars
+   table below (Alok's request, 2026-09-29). Reuses the existing --red/
+   --red-soft tokens (same ones .eligibility-warn already uses), so light/
+   dark theme both work with no new colors. */
+.kccov-npa-alert{margin-top:14px;background:var(--red-soft);border:1px solid rgba(209,54,44,.25);border-radius:12px;padding:12px 16px;display:flex;align-items:baseline;gap:10px 14px;flex-wrap:wrap}
+.kccov-npa-alert-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--red)}
+.kccov-npa-alert-date{font-size:22px;font-weight:800;color:var(--red);letter-spacing:-.3px}
+.kccov-npa-alert-days{font-size:13px;font-weight:700;color:var(--red)}
 
 /* ---------- Application Form screen redesign (2026-09-28) -- visual/
    animation layer only, no input-field/output changes. Gives this one
