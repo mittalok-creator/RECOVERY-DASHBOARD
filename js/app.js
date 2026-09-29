@@ -6118,6 +6118,26 @@ function updateSortIcons(theadId, sort){
     th.setAttribute('aria-sort', active ? (sort.dir==='asc'?'ascending':'descending') : 'none');
   });
 }
+// Alok's request, 2026-09-29: Address/Name filters should update the list
+// live as you type, not only on blur/Enter -- but the KCC Overdue/PNPA
+// Slippage tabs' filter inputs sit inside a toolbar that a full re-render
+// rebuilds from scratch (same reason the Balance Amount filter shipped
+// 2026-09-28 uses onchange, not oninput), so a naive oninput would destroy
+// and recreate the input on every keystroke, dropping focus after the
+// very first character. This wraps a synchronous full re-render so typing
+// still feels continuous: capture the cursor position before the render,
+// then restore focus + cursor on the freshly-rendered element with the
+// same id (the old node is already detached by the time this runs).
+function wireLiveTextFilter(inputId, onInput){
+  const input = document.getElementById(inputId);
+  if(!input) return;
+  input.oninput = () => {
+    const pos = input.selectionStart;
+    onInput(input.value);
+    const fresh = document.getElementById(inputId);
+    if(fresh){ fresh.focus(); try{ fresh.setSelectionRange(pos,pos); }catch(e){} }
+  };
+}
 /* Keyboard support for sortable column headers (Enter/Space triggers the same click handler) */
 document.addEventListener('keydown', (e)=>{
   if(e.key!=='Enter' && e.key!==' ') return;
@@ -6157,6 +6177,7 @@ document.addEventListener('focusin', (e)=>{
 // filter kar saken" -- Address text filter + NPA Date range, matching the
 // same filter shape already added to KCC Overdue/PNPA Slippage.
 let dashAddressFilter = '';
+let dashNameFilter = '';
 let dashNpaDateFrom = '';
 let dashNpaDateTo = '';
 function dashFilterAcctList(list){
@@ -6164,6 +6185,10 @@ function dashFilterAcctList(list){
   if(dashAddressFilter){
     const q = dashAddressFilter.trim().toLowerCase();
     out = out.filter(a=>String(a.address||'').toLowerCase().includes(q));
+  }
+  if(dashNameFilter){
+    const q = dashNameFilter.trim().toLowerCase();
+    out = out.filter(a=>String(a.name||'').toLowerCase().includes(q));
   }
   if(dashNpaDateFrom || dashNpaDateTo){
     const from = dashNpaDateFrom ? new Date(dashNpaDateFrom+'T00:00:00') : null;
@@ -6236,13 +6261,17 @@ const CUST_LIST_HEAD = '<tr>'
 
 /* ---------- Generic list modal (sortable, lazy-scrolled for account lists) ---------- */
 let __listModalScrollHandler = null;
-let listModalState = {list:[], type:'acct', sort:{key:'os',dir:'desc'}, addressFilter:''};
+let listModalState = {list:[], type:'acct', sort:{key:'os',dir:'desc'}, addressFilter:'', nameFilter:''};
 function renderListModalBody(resetScroll){
   const body = document.getElementById('listModalBody');
   let filtered = listModalState.list;
   if(listModalState.addressFilter){
     const q = listModalState.addressFilter.trim().toLowerCase();
     filtered = filtered.filter(r=>String(r.address||'').toLowerCase().includes(q));
+  }
+  if(listModalState.nameFilter){
+    const q = listModalState.nameFilter.trim().toLowerCase();
+    filtered = filtered.filter(r=>String(r.name||'').toLowerCase().includes(q));
   }
   const sorted = applySort(filtered, listModalState.sort);
   listModalState.sortedList = sorted;
@@ -6267,11 +6296,20 @@ function showListModal(title, sub, headHTML, type, list, defaultSort){
   document.getElementById('listModalTitle').textContent = title;
   document.getElementById('listModalSub').textContent = sub || '';
   document.getElementById('listModalHead').innerHTML = headHTML;
-  listModalState = {list, type, sort: defaultSort || {key:'os',dir:'desc'}, addressFilter:''};
+  listModalState = {list, type, sort: defaultSort || {key:'os',dir:'desc'}, addressFilter:'', nameFilter:''};
+  // oninput, not onchange -- live filtering (Alok, 2026-09-29). Safe here:
+  // this input is static markup in index.html, never rebuilt, so nothing
+  // destroys it mid-keystroke the way KCC Overdue/PNPA's own toolbars
+  // would (see wireLiveTextFilter()'s comment).
   const addrInput = document.getElementById('listModalAddressFilterInput');
   if(addrInput){
     addrInput.value = '';
-    addrInput.onchange = () => { listModalState.addressFilter = addrInput.value; renderListModalBody(true); };
+    addrInput.oninput = () => { listModalState.addressFilter = addrInput.value; renderListModalBody(true); };
+  }
+  const nameInput = document.getElementById('listModalNameFilterInput');
+  if(nameInput){
+    nameInput.value = '';
+    nameInput.oninput = () => { listModalState.nameFilter = nameInput.value; renderListModalBody(true); };
   }
   renderListModalBody();
   document.getElementById('listModalOverlay').classList.add('show');
@@ -6676,6 +6714,7 @@ function renderDashboard(){
     <div class="section-label">All Accounts by Outstanding<span class="chart-sub">${s.totalAccounts.toLocaleString('en-IN')} account(s) · tap a column to sort · scroll for more</span>${sectionSearchBtn()}</div>
     <div class="bank-filter-row" style="margin-bottom:10px">
       <input type="text" id="dashAddressFilterInput" class="dash-select" placeholder="Filter by Address…" value="${esc(dashAddressFilter)}" style="max-width:220px">
+      <input type="text" id="dashNameFilterInput" class="dash-select" placeholder="Filter by Name…" value="${esc(dashNameFilter)}" style="max-width:220px">
       <input type="date" id="dashNpaDateFromInput" class="dash-select" value="${esc(dashNpaDateFrom)}" style="max-width:170px" title="NPA Date from">
       <span style="color:var(--ink-mute);font-size:12px;align-self:center">to</span>
       <input type="date" id="dashNpaDateToInput" class="dash-select" value="${esc(dashNpaDateTo)}" style="max-width:170px" title="NPA Date to">
@@ -6695,8 +6734,15 @@ function renderDashboard(){
     </div>
   `;
   initAcctListScroll(dashFilterAcctList(s.allAcctSorted));
+  // oninput, not onchange -- Alok's request, 2026-09-29: filter live while
+  // typing. Safe here (unlike KCC Overdue/PNPA's own address/name inputs,
+  // see wireLiveTextFilter()'s comment) since this only calls
+  // initAcctListScroll(), never a full toolbar rebuild that would destroy
+  // the input mid-keystroke.
   const dashAddrInput = document.getElementById('dashAddressFilterInput');
-  if(dashAddrInput) dashAddrInput.onchange = () => { dashAddressFilter = dashAddrInput.value; initAcctListScroll(dashFilterAcctList(s.allAcctSorted)); };
+  if(dashAddrInput) dashAddrInput.oninput = () => { dashAddressFilter = dashAddrInput.value; initAcctListScroll(dashFilterAcctList(s.allAcctSorted)); };
+  const dashNameInput = document.getElementById('dashNameFilterInput');
+  if(dashNameInput) dashNameInput.oninput = () => { dashNameFilter = dashNameInput.value; initAcctListScroll(dashFilterAcctList(s.allAcctSorted)); };
   const dashNpaFromInput = document.getElementById('dashNpaDateFromInput');
   if(dashNpaFromInput) dashNpaFromInput.onchange = () => { dashNpaDateFrom = dashNpaFromInput.value; initAcctListScroll(dashFilterAcctList(s.allAcctSorted)); };
   const dashNpaToInput = document.getElementById('dashNpaDateToInput');
@@ -7129,6 +7175,7 @@ window.savePnpaRemark = function(acctNo, inputEl){
 
 let pnpaSlipTab = 'today';
 let pnpaAddressFilter = '';
+let pnpaNameFilter = '';
 // 'all'|'kcc'|'nonkcc' -- deliberately independent of pnpaSlipTab (picking
 // KCC then switching to This Month keeps showing just KCC accounts for
 // that period, rather than silently resetting the scheme choice).
@@ -7166,6 +7213,10 @@ function renderPnpaSlipTable(list, emptyMessage){
   if(pnpaAddressFilter){
     const q = pnpaAddressFilter.trim().toLowerCase();
     list = list.filter(r=>pnpaAddressFor(r[PC.ACCT], r[PC.CUST_ID]).toLowerCase().includes(q));
+  }
+  if(pnpaNameFilter){
+    const q = pnpaNameFilter.trim().toLowerCase();
+    list = list.filter(r=>String(r[PC.NAME]||'').toLowerCase().includes(q));
   }
   if(!list.length) return `<div class="empty-state"><p>${esc(emptyMessage || 'No accounts slipped in this period.')}</p></div>`;
   const remarks = getPnpaRemarks();
@@ -7294,12 +7345,16 @@ function renderPnpaSlipView(){
     ${tabsHtml}
     <div class="bank-filter-row">
       <input type="text" id="pnpaAddressFilterInput" class="dash-select" placeholder="Filter by Address…" value="${esc(pnpaAddressFilter)}" style="max-width:220px">
+      <input type="text" id="pnpaNameFilterInput" class="dash-select" placeholder="Filter by Name…" value="${esc(pnpaNameFilter)}" style="max-width:220px">
     </div>
     ${pnpaSlipSummaryChips(active.totals, pnpaSlipSchemeFilter)}
     ${renderPnpaSlipTable(filteredList, emptyMessages[pnpaSlipTab])}
   `;
-  const addrInput = document.getElementById('pnpaAddressFilterInput');
-  if(addrInput) addrInput.onchange = () => { pnpaAddressFilter = addrInput.value; renderPnpaSlipView(); };
+  // Live filtering (Alok, 2026-09-29) via wireLiveTextFilter() -- plain
+  // oninput would drop focus after the first keystroke here, since
+  // renderPnpaSlipView() rebuilds this whole toolbar (see wireLiveTextFilter's comment).
+  wireLiveTextFilter('pnpaAddressFilterInput', (v) => { pnpaAddressFilter = v; renderPnpaSlipView(); });
+  wireLiveTextFilter('pnpaNameFilterInput', (v) => { pnpaNameFilter = v; renderPnpaSlipView(); });
   updateSortIcons('pnpaSlipTableHead', pnpaSlipSort);
 }
 window.renderPnpaSlipView = renderPnpaSlipView;
@@ -7380,6 +7435,7 @@ let kccovMonthFilter = '';
 let kccovDateFrom = '';
 let kccovDateTo = '';
 let kccovAddressFilter = '';
+let kccovNameFilter = '';
 // Balance Amount filter (Alok's request, 2026-09-28) -- rupees, 0 means
 // "no filter". Applies via kccovFilteredRows() same as every other
 // filter here. Ported verbatim from NPA-DASHBOARD's identical feature.
@@ -7501,6 +7557,10 @@ function kccovFilteredRows(d){
     const q = kccovAddressFilter.trim().toLowerCase();
     rows = rows.filter(r=>kccovAddressFor(r[KC.ACCT], r[KC.CUST_ID]).toLowerCase().includes(q));
   }
+  if(kccovNameFilter){
+    const q = kccovNameFilter.trim().toLowerCase();
+    rows = rows.filter(r=>String(r[KC.NAME]||'').toLowerCase().includes(q));
+  }
   if(kccovDateMode==='month' && kccovMonthFilter){
     const [y,m] = kccovMonthFilter.split('-').map(Number);
     rows = rows.filter(r=>{ const dt = toDate(r[KC.CUSTNPADATE]); return dt && dt.getFullYear()===y && (dt.getMonth()+1)===m; });
@@ -7587,6 +7647,7 @@ function renderKccOverdueBody(){
     <div class="bank-filter-row">
       <select id="kccovFyFilterSelect" class="dash-select">${fyFilterOptions}</select>
       <input type="text" id="kccovAddressFilterInput" class="dash-select" placeholder="Filter by Address…" value="${esc(kccovAddressFilter)}" style="max-width:220px">
+      <input type="text" id="kccovNameFilterInput" class="dash-select" placeholder="Filter by Name…" value="${esc(kccovNameFilter)}" style="max-width:220px">
     </div>
     ${dateModeRow}
     <div class="bank-filter-row">${dateInputsRow}</div>
@@ -7683,8 +7744,11 @@ function renderKccOverdueBody(){
   if(branchSel) branchSel.onchange = () => { kccovBranchFilter = branchSel.value; renderKccOverdueBody(); };
   const fySel = document.getElementById('kccovFyFilterSelect');
   if(fySel) fySel.onchange = () => { kccovFyFilter = fySel.value; renderKccOverdueBody(); };
-  const addrInput = document.getElementById('kccovAddressFilterInput');
-  if(addrInput) addrInput.onchange = () => { kccovAddressFilter = addrInput.value; renderKccOverdueBody(); };
+  // Live filtering (Alok, 2026-09-29) via wireLiveTextFilter() -- plain
+  // oninput would drop focus after the first keystroke here, since
+  // renderKccOverdueBody() rebuilds this whole toolbar (see its comment).
+  wireLiveTextFilter('kccovAddressFilterInput', (v) => { kccovAddressFilter = v; renderKccOverdueBody(); });
+  wireLiveTextFilter('kccovNameFilterInput', (v) => { kccovNameFilter = v; renderKccOverdueBody(); });
   const monthInput = document.getElementById('kccovMonthInput');
   if(monthInput) monthInput.onchange = () => { kccovMonthFilter = monthInput.value; renderKccOverdueBody(); };
   const fromInput = document.getElementById('kccovDateFromInput');
