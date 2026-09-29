@@ -538,6 +538,44 @@ function otsAppSearch(){
   renderOtsApplicationDetail();
 }
 window.otsAppSearch = otsAppSearch;
+// Alok's request, 2026-09-29: an "Application Form" icon on the NPA
+// account Particulars page (showNpaAccountDetail()) that deep-links
+// straight into that same account's Application Form -- skips the manual
+// text search entirely since the exact row is already known via byCustId
+// (the same Map showNpaAccountDetail() itself uses).
+function otsAppWaitForViewActive(view, cb, triesLeft){
+  const target = document.querySelector(`.view[data-view="${view}"]`);
+  if(target && target.classList.contains('active')){ cb(); return; }
+  // Guards against switchView()'s ~120ms exit-transition delay (it only
+  // applies doSwitch(), which flips .active, after that timeout when
+  // leaving a different currently-active view) -- polls instead of
+  // guessing a fixed wait, capped so this can never hang if something
+  // about the view/nav structure ever changes.
+  if((triesLeft===undefined?20:triesLeft)<=0) return;
+  requestAnimationFrame(()=>otsAppWaitForViewActive(view, cb, (triesLeft===undefined?20:triesLeft)-1));
+}
+function otsAppOpenFromNpaDetail(custId){
+  // Hides the NPA Particulars overlay first -- it's an opaque, full-
+  // viewport #detailPane (z-index 95) that doesn't deactivate whatever
+  // view sits underneath (see showNpaAccountDetail()'s own comment), so
+  // without this the Application Form tab would render correctly
+  // underneath while the overlay still visually/interactively covers it.
+  closeDetail();
+  const row = byCustId.get(String(custId));
+  switchView('otsapplication');
+  otsAppWaitForViewActive('otsapplication', () => {
+    if(!row) return;
+    __otsAppRow = row;
+    __otsAppLetterHtml = null;
+    __otsAppManualMode = false;
+    const input = document.getElementById('otsAppSearchInput');
+    if(input) input.value = row[C.ACCT_NO] || '';
+    const statusEl = document.getElementById('otsAppSearchStatus');
+    if(statusEl) statusEl.innerHTML = '';
+    renderOtsApplicationDetail();
+  });
+}
+window.otsAppOpenFromNpaDetail = otsAppOpenFromNpaDetail;
 // Auto-suggest Branch Name/District off a typed Sol ID (BRANCH_LIST/
 // BRANCH_META, same reference data the auto-fill card's own lookup
 // uses) -- only fills a field the user hasn't already typed into,
@@ -5676,6 +5714,9 @@ function showNpaAccountDetail(custId){
           <h2>${esc(custRow[C.NAME])||'—'}</h2>
           <p>${esc(custRow[C.SOL_DESC])||''} · Cust ID ${esc(custRow[C.CUST_ID])}</p>
         </div>
+        <button class="share-btn" onclick="otsAppOpenFromNpaDetail('${esc(String(custRow[C.CUST_ID]))}')" title="Open Application Form for this account" aria-label="Open Application Form for this account">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
+        </button>
       </div>
     </div>
     <div class="detail-inner">
