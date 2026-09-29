@@ -2124,6 +2124,22 @@ html,body{overscroll-behavior:none}
    .bank-tab-row -- groups them visually without a second row. */
 .bank-tab-sep{width:1px;align-self:stretch;background:var(--line);margin:2px 2px}
 
+/* ---------- KCC Overdue redesign: filter card, hero share-bar, active
+   ring, underline view tabs (ported from npadashboard's identical round) ---------- */
+.kccov-filter-card{padding-bottom:20px}
+.kccov-filter-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:14px}
+.kccov-filter-field label{display:block;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--sub);margin-bottom:5px}
+.kccov-filter-field .dash-select{width:100%;min-width:0}
+@media (max-width:599px){ .kccov-filter-grid{grid-template-columns:1fr} }
+.hero-share-track{height:5px;border-radius:3px;background:rgba(120,120,140,.16);margin-top:10px;overflow:hidden}
+.hero-share-fill{height:100%;border-radius:3px}
+.hero-kpi-card.kccov-active{box-shadow:0 0 0 3px var(--hero-tint), var(--shadow-sm)}
+.kccov-view-tabs{display:flex;gap:24px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:18px 0 0;align-items:stretch}
+.kccov-view-tab{background:none;border:none;padding:0 2px 10px;font-size:12.5px;font-weight:700;color:var(--sub);border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap;font-family:inherit;transition:color .15s var(--ease),border-color .15s var(--ease)}
+.kccov-view-tab:hover{color:var(--ink)}
+.kccov-view-tab.active{color:var(--ink);border-bottom-color:var(--accent)}
+.kccov-view-tab-sep{width:1px;background:var(--line);margin:0 2px 10px}
+
 /* ---------- Dashboard: insight / attention strip ---------- */
 .insight-strip{
   display:flex;align-items:center;gap:16px;
