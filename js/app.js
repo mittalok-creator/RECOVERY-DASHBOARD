@@ -277,12 +277,15 @@ window.printOtsSheet = printOtsSheet;
    linked accounts can easily run past one page -- this crops the source
    canvas into page-height strips rather than squashing everything onto
    one page and making it unreadable. */
-function canvasToPdfBlob(canvas){
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit:'pt', format:'a4', orientation:'portrait', compress:true });
-  const margin = 24;
-  const usableW = doc.internal.pageSize.getWidth() - margin*2;
-  const usableH = doc.internal.pageSize.getHeight() - margin*2;
+/* Adds one canvas's content into `doc`, starting on the doc's CURRENT
+   page (call doc.addPage() yourself first if this canvas isn't the first
+   thing in the doc), slicing across as many further pages as the canvas
+   itself needs. Extracted out of canvasToPdfBlob() below so a caller
+   building one shared PDF across several independently-rendered canvases
+   (e.g. the Application Form's multi-account letters, one canvas per
+   account) can reuse this exact per-canvas page-slicing logic instead of
+   producing N separate single-canvas PDFs. */
+function addCanvasPagesToDoc(doc, canvas, margin, usableW, usableH){
   const scale = usableW / canvas.width; // canvas px -> PDF pt
   const pxPerPage = Math.floor(usableH / scale);
   // addImage(canvas) with the live HTMLCanvasElement embeds it essentially
@@ -304,6 +307,14 @@ function canvasToPdfBlob(canvas){
       first = false;
     }
   }
+}
+function canvasToPdfBlob(canvas){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4', orientation:'portrait', compress:true });
+  const margin = 24;
+  const usableW = doc.internal.pageSize.getWidth() - margin*2;
+  const usableH = doc.internal.pageSize.getHeight() - margin*2;
+  addCanvasPagesToDoc(doc, canvas, margin, usableW, usableH);
   return doc.output('blob');
 }
 /* Shared by both share paths below: hands a finished file to the Web
@@ -501,8 +512,8 @@ function buildOtsApplicationFormHTML(row, d){
     + '</div>';
 }
 
-let __otsAppRow = null;
-let __otsAppLetterHtml = null;
+let __otsAppRows = [];
+let __otsAppLetters = [];
 // Alok, 2026-09-27: "agar data already fetch ho raha hai to ye ban hi
 // jayega agar ismain data nahi milta to all required data fill karne k
 // liye aaye aur application generate ho jaye but show tab hi kare jab
@@ -526,12 +537,31 @@ function otsAppFindAccount(query){
       || rows.find(r=>String(r[C.NAME]||'').toLowerCase().includes(q))
       || null;
 }
+/* Gathers every account linked to one Customer ID, reusing the exact same
+   HELPER key (custId+':'+slotNo, slot 1-4) the read-only NPA Particulars
+   page's own multi-loan-slot view already relies on (npaByHelper) -- not
+   a new grouping concept, just applied to the Application Form. A logged-
+   in branch stays locked to its own slot(s) even if this customer happens
+   to have an account in a different branch, same trust boundary
+   otsAppLockedRows() already enforces for a single account. */
+function otsAppCustomerRows(custId){
+  if(!custId) return [];
+  const rows = [1,2,3,4].map(n=>npaByHelper.get(custId+':'+n)).filter(Boolean);
+  const solId = loggedInSolId();
+  return solId ? rows.filter(r=>String(r[C.SOL_ID])===String(solId)) : rows;
+}
 function otsAppSearch(){
   const input = document.getElementById('otsAppSearchInput');
   const q = input ? input.value : '';
   const row = otsAppFindAccount(q);
-  __otsAppRow = row;
-  __otsAppLetterHtml = null;
+  if(row){
+    const custId = String(row[C.CUST_ID]||'');
+    const grouped = custId ? otsAppCustomerRows(custId) : [];
+    __otsAppRows = grouped.length ? grouped : [row];
+  } else {
+    __otsAppRows = [];
+  }
+  __otsAppLetters = [];
   __otsAppManualMode = !row && !!q.trim();
   const statusEl = document.getElementById('otsAppSearchStatus');
   if(statusEl) statusEl.innerHTML = __otsAppManualMode ? '<div class="upload-status warn">No matching account found in your branch — fill in the details manually below.</div>' : '';
@@ -561,15 +591,24 @@ function otsAppOpenFromNpaDetail(custId){
   // without this the Application Form tab would render correctly
   // underneath while the overlay still visually/interactively covers it.
   closeDetail();
-  const row = byCustId.get(String(custId));
+  const cid = String(custId);
+  // Real bug fixed here, 2026-09-30: this used to resolve only byCustId's
+  // single first row, even though showNpaAccountDetail() (the caller) had
+  // already shown "N loan accounts linked" for this exact customer --
+  // deep-linking from a multi-account customer's Particulars page silently
+  // dropped to just one account. Now uses the same grouping the manual
+  // search path uses, falling back to the single-row lookup only if that
+  // grouping somehow yields nothing.
+  const grouped = otsAppCustomerRows(cid);
+  const rows = grouped.length ? grouped : (byCustId.has(cid) ? [byCustId.get(cid)] : []);
   switchView('otsapplication');
   otsAppWaitForViewActive('otsapplication', () => {
-    if(!row) return;
-    __otsAppRow = row;
-    __otsAppLetterHtml = null;
+    if(!rows.length) return;
+    __otsAppRows = rows;
+    __otsAppLetters = [];
     __otsAppManualMode = false;
     const input = document.getElementById('otsAppSearchInput');
-    if(input) input.value = row[C.ACCT_NO] || '';
+    if(input) input.value = rows[0][C.ACCT_NO] || '';
     const statusEl = document.getElementById('otsAppSearchStatus');
     if(statusEl) statusEl.innerHTML = '';
     renderOtsApplicationDetail();
@@ -594,21 +633,30 @@ function otsAppManualSolIdChanged(){
 }
 window.otsAppManualSolIdChanged = otsAppManualSolIdChanged;
 function otsAppAddDays(date, days){ const d = new Date(date.getTime()); d.setDate(d.getDate()+days); return d; }
-// Shared by both the auto-fill path and the manual-entry path below --
-// reads the same 5 settlement fields (ids unchanged either way) and
-// returns null (after alerting) if Outstanding is missing/invalid.
-function otsAppReadSettlementFields(){
-  const outstandingEl = document.getElementById('otsAppOutstanding');
+// Account 1 (idx 0, or the manual-entry path, which always calls with no
+// idx at all) keeps the exact original, unsuffixed ids (otsAppOutstanding,
+// etc.) so the single-account case -- still the overwhelming majority --
+// renders byte-for-byte the same DOM as before this round; accounts 2-4
+// (a customer can have up to 4 linked slots) get a numbered suffix.
+function otsAppFieldId(base, idx){ return !idx ? base : base+'_'+(idx+1); }
+// Shared by the auto-fill path (real or grouped rows), the manual-entry
+// path, and the multi-account loop below -- reads one account's 5
+// settlement fields and returns null (after alerting) if Outstanding is
+// missing/invalid. `alertMsg` lets the multi-account loop name which
+// account is missing it; omitted, this alerts exactly as it always did.
+function otsAppReadSettlementFields(idx, alertMsg){
+  idx = idx || 0;
+  const outstandingEl = document.getElementById(otsAppFieldId('otsAppOutstanding', idx));
   const outstandingRaw = (outstandingEl && outstandingEl.value || '').replace(/,/g,'').trim();
   const outstanding = Number(outstandingRaw);
   if(!outstandingRaw || isNaN(outstanding) || outstanding<=0){
-    alert('Please enter a valid Outstanding amount.');
+    alert(alertMsg || 'Please enter a valid Outstanding amount.');
     return null;
   }
-  const purpose = (document.getElementById('otsAppPurpose').value||'').trim();
-  const otsAmt = Number((document.getElementById('otsAppOtsAmt').value||'').replace(/,/g,'')) || 0;
-  const tokenAmt = Number((document.getElementById('otsAppTokenAmt').value||'').replace(/,/g,'')) || 0;
-  const tokenDateVal = document.getElementById('otsAppTokenDate').value;
+  const purpose = (document.getElementById(otsAppFieldId('otsAppPurpose', idx)).value||'').trim();
+  const otsAmt = Number((document.getElementById(otsAppFieldId('otsAppOtsAmt', idx)).value||'').replace(/,/g,'')) || 0;
+  const tokenAmt = Number((document.getElementById(otsAppFieldId('otsAppTokenAmt', idx)).value||'').replace(/,/g,'')) || 0;
+  const tokenDateVal = document.getElementById(otsAppFieldId('otsAppTokenDate', idx)).value;
   let tokenDate = null;
   if(tokenDateVal){
     const parts = tokenDateVal.split('-');
@@ -620,19 +668,33 @@ function otsAppReadSettlementFields(){
 }
 function otsAppRenderPreview(){
   const wrap = document.getElementById('otsAppPreviewWrap');
-  if(!wrap || !__otsAppLetterHtml) return;
-  wrap.innerHTML = '<div class="card ots-app-letter-frame">'
-    + '<div class="ots-app-letter-frame-head">'
-    +   '<div class="ots-app-letter-frame-title">Generated Application Form</div>'
-    +   '<div class="ots-app-ready-badge"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Ready</div>'
-    + '</div>'
-    + '<div class="ots-app-letter-paper">' + __otsAppLetterHtml + '</div>'
-    + '<div class="ots-app-letter-actions">'
-    +   '<button type="button" class="ots-app-btn-pill" onclick="otsAppPrint()">🖨 <span>Print</span></button>'
+  const letters = __otsAppLetters;
+  if(!wrap || !letters.length) return;
+  const actionsHtml = '<div class="ots-app-letter-actions">'
+    +   '<button type="button" class="ots-app-btn-pill" onclick="otsAppPrint()">🖨 <span>Print' + (letters.length>1?' All':'') + '</span></button>'
     +   '<button type="button" class="ots-app-btn-pill" onclick="otsAppSavePdf()">⬇ <span>Save as PDF</span></button>'
     +   '<button type="button" class="ots-app-btn-pill accent" onclick="otsAppSharePdf()">📤 <span>Share on WhatsApp</span></button>'
-    + '</div>'
     + '</div>';
+  if(letters.length===1){
+    wrap.innerHTML = '<div class="card ots-app-letter-frame">'
+      + '<div class="ots-app-letter-frame-head">'
+      +   '<div class="ots-app-letter-frame-title">Generated Application Form</div>'
+      +   '<div class="ots-app-ready-badge"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Ready</div>'
+      + '</div>'
+      + '<div class="ots-app-letter-paper">' + letters[0].html + '</div>'
+      + actionsHtml
+      + '</div>';
+  } else {
+    wrap.innerHTML = '<div class="card ots-app-letter-frame">'
+      + '<div class="ots-app-letter-frame-head">'
+      +   '<div class="ots-app-letter-frame-title">Generated Application Forms (' + letters.length + ')</div>'
+      +   '<div class="ots-app-ready-badge"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Ready</div>'
+      + '</div>'
+      + actionsHtml
+      + letters.map((l,i)=>'<div class="ots-app-letter-caption">Application Form — Account ' + (i+1) + ' of ' + letters.length + ' (A/c No. ' + esc(String(l.row[C.ACCT_NO]||'—')) + ')</div>'
+          + '<div class="ots-app-letter-paper">' + l.html + '</div>').join('')
+      + '</div>';
+  }
   wrap.scrollIntoView({behavior:'smooth', block:'start'});
   const genBtn = document.getElementById('otsAppGenerateBtn');
   if(genBtn){ genBtn.classList.remove('success'); void genBtn.offsetWidth; genBtn.classList.add('success'); }
@@ -640,23 +702,33 @@ function otsAppRenderPreview(){
 }
 function otsAppGenerate(){
   if(__otsAppManualMode){ otsAppGenerateManual(); return; }
-  const row = __otsAppRow;
-  if(!row) return;
-  const f = otsAppReadSettlementFields();
-  if(!f) return;
-  const acctOpenDate = toDate(row[C.OPN_DT]);
-  const district = (BRANCH_META[Number(row[C.SOL_ID])]||{}).district || '';
-  __otsAppLetterHtml = buildOtsApplicationFormHTML(row, {
-    acctOpenDate, osatots: f.outstanding, otsamt: f.otsAmt, tokenamt: f.tokenAmt,
-    tokendate: f.tokenDate, restdate: f.restDate, purpose: f.purpose, district
-  });
+  const rows = __otsAppRows;
+  if(!rows.length) return;
+  const letters = [];
+  for(let idx=0; idx<rows.length; idx++){
+    const row = rows[idx];
+    const alertMsg = rows.length>1
+      ? ('Please enter a valid Outstanding amount for Account ' + (idx+1) + ' of ' + rows.length + ' (A/c No. ' + (row[C.ACCT_NO]||'—') + ').')
+      : undefined;
+    const f = otsAppReadSettlementFields(idx, alertMsg);
+    if(!f) return;
+    const acctOpenDate = toDate(row[C.OPN_DT]);
+    const district = (BRANCH_META[Number(row[C.SOL_ID])]||{}).district || '';
+    const html = buildOtsApplicationFormHTML(row, {
+      acctOpenDate, osatots: f.outstanding, otsamt: f.otsAmt, tokenamt: f.tokenAmt,
+      tokendate: f.tokenDate, restdate: f.restDate, purpose: f.purpose, district
+    });
+    letters.push({ row, html });
+  }
+  __otsAppLetters = letters;
   otsAppRenderPreview();
 }
 window.otsAppGenerate = otsAppGenerate;
 // Manual-entry fallback: builds a synthetic C-indexed row (same shape the
 // letter builder already expects from a real DATA.npa.rows entry) out of
 // hand-typed fields, so buildOtsApplicationFormHTML() needs no changes at
-// all -- it can't tell the difference between this and a real row.
+// all -- it can't tell the difference between this and a real row. Always
+// single-account -- there's no Customer ID here to group by.
 function otsAppGenerateManual(){
   const req = (id, label) => {
     const el = document.getElementById(id);
@@ -689,30 +761,32 @@ function otsAppGenerateManual(){
   row[C.ADDR] = address;
   row[C.PHONE] = mobile;
   row[C.SANCT_LIM] = loanAmt;
-  __otsAppRow = row; // otsAppFileBase()/otsAppSharePdf() read this same way for both modes
+  __otsAppRows = [row]; // otsAppFileBase()/otsAppSharePdf() read this same way for both modes
 
-  __otsAppLetterHtml = buildOtsApplicationFormHTML(row, {
+  __otsAppLetters = [{ row, html: buildOtsApplicationFormHTML(row, {
     acctOpenDate, osatots: f.outstanding, otsamt: f.otsAmt, tokenamt: f.tokenAmt,
     tokendate: f.tokenDate, restdate: f.restDate, purpose: f.purpose, district
-  });
+  }) }];
   otsAppRenderPreview();
 }
 window.otsAppGenerateManual = otsAppGenerateManual;
 function otsAppPrint(){
-  if(!__otsAppLetterHtml) return;
-  document.getElementById('printArea').innerHTML = __otsAppLetterHtml;
+  if(!__otsAppLetters.length) return;
+  document.getElementById('printArea').innerHTML = '<div class="ots-app-print-wrap">'
+    + __otsAppLetters.map(l=>'<div class="ots-app-letter-page">' + l.html + '</div>').join('')
+    + '</div>';
   printWithPageSize('size:A4;margin:12mm');
 }
 window.otsAppPrint = otsAppPrint;
-/* Shared by Save-as-PDF and WhatsApp Share below -- rasterizes the letter
+/* Shared by Save-as-PDF and WhatsApp Share below -- rasterizes one letter
    off-screen via #printArea (same trick shareOtsPdf() above already uses:
    #printArea is display:none outside @media print, so it's floated
    on-screen at -9999px just long enough for html2canvas to capture it). */
-async function otsAppRenderCanvas(){
+async function otsAppRenderLetterCanvas(html){
   await Promise.all([ensureHtml2Canvas(), ensureJsPDF()]);
   const printEl = document.getElementById('printArea');
   const prevCss = printEl.style.cssText;
-  printEl.innerHTML = __otsAppLetterHtml;
+  printEl.innerHTML = html;
   printEl.style.cssText = 'display:block;position:fixed;left:-9999px;top:0;width:900px;background:#fff;padding:0;z-index:-1';
   if(document.fonts && document.fonts.ready){ try{ await document.fonts.ready; }catch(e){} }
   await new Promise(r=>setTimeout(r, 60));
@@ -729,16 +803,37 @@ async function otsAppRenderCanvas(){
    Alok's own request, 2026-09-27 -- makes a saved/shared file identifiable
    without opening it, unlike the OTS Calculator's own name-only filename. */
 function otsAppFileBase(){
-  const row = __otsAppRow || {};
+  const row = __otsAppRows[0] || {};
   const safeName = String(row[C.NAME]||'borrower').replace(/[\\/:*?"<>|]/g,' ').replace(/\s+/g,' ').trim().slice(0,40);
   const safeBranch = String(row[C.SOL_DESC]||'').replace(/[\\/:*?"<>|]/g,' ').replace(/\s+/g,' ').trim().slice(0,30);
-  return 'Application_Form_' + safeName + (safeBranch ? ('_' + safeBranch) : '');
+  const suffix = __otsAppLetters.length>1 ? '_AllAccounts' : '';
+  return 'Application_Form_' + safeName + (safeBranch ? ('_' + safeBranch) : '') + suffix;
+}
+/* Renders every letter's own canvas and adds it into ONE shared jsPDF doc
+   (addPage() before every canvas after the first), reusing the existing
+   addCanvasPagesToDoc() per-canvas page-slicing helper -- the same
+   "several independently-rendered things, one combined PDF" technique
+   NPA-DASHBOARD's own port of this feature already proved out. For a
+   single letter this is exactly what canvasToPdfBlob() itself already
+   did -- output unchanged for the common case. */
+async function otsAppBuildCombinedPdfBlob(){
+  await Promise.all([ensureHtml2Canvas(), ensureJsPDF()]);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4', orientation:'portrait', compress:true });
+  const margin = 24;
+  const usableW = doc.internal.pageSize.getWidth() - margin*2;
+  const usableH = doc.internal.pageSize.getHeight() - margin*2;
+  for(let i=0;i<__otsAppLetters.length;i++){
+    const canvas = await otsAppRenderLetterCanvas(__otsAppLetters[i].html);
+    if(i>0) doc.addPage();
+    addCanvasPagesToDoc(doc, canvas, margin, usableW, usableH);
+  }
+  return doc.output('blob');
 }
 async function otsAppSavePdf(){
-  if(!__otsAppLetterHtml) return;
+  if(!__otsAppLetters.length) return;
   try{
-    const canvas = await otsAppRenderCanvas();
-    const blob = canvasToPdfBlob(canvas);
+    const blob = await otsAppBuildCombinedPdfBlob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = otsAppFileBase() + '.pdf';
@@ -751,12 +846,11 @@ async function otsAppSavePdf(){
 }
 window.otsAppSavePdf = otsAppSavePdf;
 async function otsAppSharePdf(){
-  if(!__otsAppLetterHtml) return;
+  if(!__otsAppLetters.length) return;
   try{
-    const canvas = await otsAppRenderCanvas();
-    const blob = canvasToPdfBlob(canvas);
-    const row = __otsAppRow || {};
-    const shareText = (row[C.NAME]||'—') + ' — ' + (row[C.SOL_DESC]||'—') + ' — Application Form';
+    const blob = await otsAppBuildCombinedPdfBlob();
+    const row = __otsAppRows[0] || {};
+    const shareText = (row[C.NAME]||'—') + ' — ' + (row[C.SOL_DESC]||'—') + ' — Application Form' + (__otsAppLetters.length>1 ? (' (' + __otsAppLetters.length + ' accounts)') : '');
     await shareFileOrFallback(blob, otsAppFileBase() + '.pdf', 'application/pdf', shareText);
   }catch(err){
     console.error(err);
@@ -832,36 +926,45 @@ function otsAppAnimateCountUp(el, target, fmtFn){
 // the 5 fields that are ALWAYS typed by hand, in either mode. hintHtml is
 // the small note under Outstanding; only the auto-fill path has a ledger
 // figure to reference, so the manual path passes ''.
-function otsAppSettlementFieldsCardHtml(hintHtml){
-  return '<div class="card ots-app-fields-card">'
-    + '<div style="font-weight:800;margin-bottom:12px;">Please enter these details</div>'
-    + '<div class="ots-app-fields-grid">'
+// Extracted so the multi-account render below can reuse the same 5-field
+// grid per account (id-suffixed via otsAppFieldId()) without a button of
+// its own -- otsAppSettlementFieldsCardHtml() below still wraps this in
+// the original single-account/manual-mode card, unsuffixed (idx 0),
+// button included, byte-for-byte the same output as before this split.
+function otsAppFieldsGridHtml(idx, hintHtml){
+  idx = idx || 0;
+  return '<div class="ots-app-fields-grid">'
     +   '<div class="ots-app-field">'
     +     '<label class="ots-app-field-label">Outstanding as on Date of OTS <span class="req">*</span></label>'
     +     '<div class="ots-app-field-input-wrap"><span class="ots-app-field-icon">₹</span>'
-    +       '<input type="text" inputmode="decimal" id="otsAppOutstanding" class="dash-select ots-app-field-input" placeholder="e.g. 245000"></div>'
+    +       '<input type="text" inputmode="decimal" id="' + otsAppFieldId('otsAppOutstanding', idx) + '" class="dash-select ots-app-field-input" placeholder="e.g. 245000"></div>'
     +     (hintHtml ? ('<div class="ots-app-field-hint">' + hintHtml + '</div>') : '')
     +   '</div>'
     +   '<div class="ots-app-field">'
     +     '<label class="ots-app-field-label">Purpose of Loan</label>'
     +     '<div class="ots-app-field-input-wrap"><span class="ots-app-field-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>'
-    +       '<input type="text" id="otsAppPurpose" class="dash-select ots-app-field-input" placeholder="e.g. पशुपालन हेतु"></div>'
+    +       '<input type="text" id="' + otsAppFieldId('otsAppPurpose', idx) + '" class="dash-select ots-app-field-input" placeholder="e.g. पशुपालन हेतु"></div>'
     +   '</div>'
     +   '<div class="ots-app-field">'
     +     '<label class="ots-app-field-label">OTS / Compromise Amount</label>'
     +     '<div class="ots-app-field-input-wrap"><span class="ots-app-field-icon">₹</span>'
-    +       '<input type="text" inputmode="decimal" id="otsAppOtsAmt" class="dash-select ots-app-field-input" placeholder="e.g. 140000"></div>'
+    +       '<input type="text" inputmode="decimal" id="' + otsAppFieldId('otsAppOtsAmt', idx) + '" class="dash-select ots-app-field-input" placeholder="e.g. 140000"></div>'
     +   '</div>'
     +   '<div class="ots-app-field">'
     +     '<label class="ots-app-field-label">Token Amount</label>'
     +     '<div class="ots-app-field-input-wrap"><span class="ots-app-field-icon">₹</span>'
-    +       '<input type="text" inputmode="decimal" id="otsAppTokenAmt" class="dash-select ots-app-field-input" placeholder="e.g. 25000"></div>'
+    +       '<input type="text" inputmode="decimal" id="' + otsAppFieldId('otsAppTokenAmt', idx) + '" class="dash-select ots-app-field-input" placeholder="e.g. 25000"></div>'
     +   '</div>'
     +   '<div class="ots-app-field">'
     +     '<label class="ots-app-field-label">Token Date</label>'
-    +     '<input type="date" id="otsAppTokenDate" class="dash-select" style="width:100%;min-width:0">'
+    +     '<input type="date" id="' + otsAppFieldId('otsAppTokenDate', idx) + '" class="dash-select" style="width:100%;min-width:0">'
     +   '</div>'
-    + '</div>'
+    + '</div>';
+}
+function otsAppSettlementFieldsCardHtml(hintHtml){
+  return '<div class="card ots-app-fields-card">'
+    + '<div style="font-weight:800;margin-bottom:12px;">Please enter these details</div>'
+    + otsAppFieldsGridHtml(0, hintHtml)
     + '<div style="margin-top:18px;">'
     +   '<button type="button" class="ots-app-btn-primary" id="otsAppGenerateBtn" onclick="otsAppGenerate()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Generate Application Form</button>'
     + '</div>'
@@ -901,34 +1004,91 @@ function renderOtsApplicationDetail(){
   const wrap = document.getElementById('otsAppDetail');
   if(!wrap) return;
   if(__otsAppManualMode){ wrap.innerHTML = otsAppManualFormHtml(); otsAppSetStep('details'); return; }
-  const row = __otsAppRow;
-  if(!row){ wrap.innerHTML = ''; otsAppSetStep('find'); return; }
-  const meta = BRANCH_META[Number(row[C.SOL_ID])] || {};
-  const acctOpenDate = toDate(row[C.OPN_DT]);
-  const loanAmt = Number(row[C.SANCT_LIM])||0;
-  const outstandingAmt = Number(row[C.OUTBAL])||0;
-  wrap.innerHTML = '<div class="card ots-app-profile-card">'
+  const rows = __otsAppRows;
+  if(!rows.length){ wrap.innerHTML = ''; otsAppSetStep('find'); return; }
+
+  if(rows.length===1){
+    // Exactly the original single-account layout, byte-for-byte -- the
+    // common case is unaffected by the multi-account round below.
+    const row = rows[0];
+    const meta = BRANCH_META[Number(row[C.SOL_ID])] || {};
+    const acctOpenDate = toDate(row[C.OPN_DT]);
+    const loanAmt = Number(row[C.SANCT_LIM])||0;
+    const outstandingAmt = Number(row[C.OUTBAL])||0;
+    wrap.innerHTML = '<div class="card ots-app-profile-card">'
+      + '<div class="ots-app-profile-head">'
+      +   '<div class="ots-app-avatar">' + esc(otsAppInitials(row[C.NAME])) + '</div>'
+      +   '<div>'
+      +     '<div class="ots-app-profile-name-txt">' + (esc(row[C.NAME])||'—') + '</div>'
+      +     '<div class="ots-app-profile-badges">'
+      +       '<span class="ots-app-badge">' + (esc(row[C.SOL_DESC])||'—') + ' (' + (esc(row[C.SOL_ID])||'—') + ')</span>'
+      +       (meta.district ? '<span class="ots-app-badge alt">' + esc(meta.district) + '</span>' : '')
+      +     '</div>'
+      +   '</div>'
+      + '</div>'
+      + '<div class="ots-app-profile-stats">'
+      +   '<div class="ots-app-stat"><span class="lbl">Account No.</span><span class="v">' + (esc(row[C.ACCT_NO])||'—') + '</span></div>'
+      +   '<div class="ots-app-stat"><span class="lbl">Mobile No.</span><span class="v">' + (esc(row[C.PHONE])||'—') + '</span></div>'
+      +   '<div class="ots-app-stat"><span class="lbl">Loan Amount</span><span class="v" id="otsAppLoanAmtStat">₹0.00</span><span class="sub">since ' + fmtDate(acctOpenDate) + '</span></div>'
+      +   '<div class="ots-app-stat highlight"><span class="lbl">Outstanding (as per records)</span><span class="v" id="otsAppOutstandingStat">₹0.00</span></div>'
+      + '</div>'
+      + '</div>'
+      + otsAppSettlementFieldsCardHtml('Records show ' + fmtINR2(outstandingAmt) + ' — enter the actual figure as on the settlement date.')
+      + '<div id="otsAppPreviewWrap"></div>';
+    otsAppAnimateCountUp(document.getElementById('otsAppLoanAmtStat'), loanAmt, fmtINR2);
+    otsAppAnimateCountUp(document.getElementById('otsAppOutstandingStat'), outstandingAmt, fmtINR2);
+    otsAppSetStep('details');
+    return;
+  }
+
+  // Multi-account customer: one shared customer header, then one
+  // settlement-fields card per linked account (its own auto-fill stats +
+  // its own 5 fields via otsAppFieldsGridHtml(), id-suffixed by position),
+  // then one shared "Generate All" button.
+  const primary = rows[0];
+  const meta = BRANCH_META[Number(primary[C.SOL_ID])] || {};
+  let html = '<div class="card ots-app-profile-card">'
     + '<div class="ots-app-profile-head">'
-    +   '<div class="ots-app-avatar">' + esc(otsAppInitials(row[C.NAME])) + '</div>'
+    +   '<div class="ots-app-avatar">' + esc(otsAppInitials(primary[C.NAME])) + '</div>'
     +   '<div>'
-    +     '<div class="ots-app-profile-name-txt">' + (esc(row[C.NAME])||'—') + '</div>'
+    +     '<div class="ots-app-profile-name-txt">' + (esc(primary[C.NAME])||'—') + '</div>'
     +     '<div class="ots-app-profile-badges">'
-    +       '<span class="ots-app-badge">' + (esc(row[C.SOL_DESC])||'—') + ' (' + (esc(row[C.SOL_ID])||'—') + ')</span>'
+    +       '<span class="ots-app-badge">' + (esc(primary[C.SOL_DESC])||'—') + ' (' + (esc(primary[C.SOL_ID])||'—') + ')</span>'
     +       (meta.district ? '<span class="ots-app-badge alt">' + esc(meta.district) + '</span>' : '')
+    +       '<span class="ots-app-badge alt">🔗 ' + rows.length + ' linked accounts</span>'
     +     '</div>'
     +   '</div>'
     + '</div>'
     + '<div class="ots-app-profile-stats">'
-    +   '<div class="ots-app-stat"><span class="lbl">Account No.</span><span class="v">' + (esc(row[C.ACCT_NO])||'—') + '</span></div>'
-    +   '<div class="ots-app-stat"><span class="lbl">Mobile No.</span><span class="v">' + (esc(row[C.PHONE])||'—') + '</span></div>'
-    +   '<div class="ots-app-stat"><span class="lbl">Loan Amount</span><span class="v" id="otsAppLoanAmtStat">₹0.00</span><span class="sub">since ' + fmtDate(acctOpenDate) + '</span></div>'
-    +   '<div class="ots-app-stat highlight"><span class="lbl">Outstanding (as per records)</span><span class="v" id="otsAppOutstandingStat">₹0.00</span></div>'
+    +   '<div class="ots-app-stat"><span class="lbl">Mobile No.</span><span class="v">' + (esc(primary[C.PHONE])||'—') + '</span></div>'
     + '</div>'
+    + '</div>';
+
+  rows.forEach((row, idx)=>{
+    const acctOpenDate = toDate(row[C.OPN_DT]);
+    const outstandingAmt = Number(row[C.OUTBAL])||0;
+    html += '<div class="card ots-app-fields-card">'
+      + '<div style="font-weight:800;margin-bottom:12px;">Account ' + (idx+1) + ' of ' + rows.length + ' — A/c No. ' + esc(String(row[C.ACCT_NO]||'—')) + (row[C.SCHEME]?(' — ' + esc(row[C.SCHEME])):'') + '</div>'
+      + '<div class="ots-app-profile-stats" style="margin-bottom:14px;">'
+      +   '<div class="ots-app-stat"><span class="lbl">Loan Amount</span><span class="v" id="' + otsAppFieldId('otsAppLoanAmtStat', idx) + '">₹0.00</span><span class="sub">since ' + fmtDate(acctOpenDate) + '</span></div>'
+      +   '<div class="ots-app-stat highlight"><span class="lbl">Outstanding (as per records)</span><span class="v" id="' + otsAppFieldId('otsAppOutstandingStat', idx) + '">₹0.00</span></div>'
+      + '</div>'
+      + otsAppFieldsGridHtml(idx, 'Records show ' + fmtINR2(outstandingAmt) + ' — enter the actual figure as on the settlement date.')
+      + '</div>';
+  });
+
+  html += '<div class="card" style="padding:18px;">'
+    + '<button type="button" class="ots-app-btn-primary" id="otsAppGenerateBtn" onclick="otsAppGenerate()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Generate All Application Forms (' + rows.length + ')</button>'
     + '</div>'
-    + otsAppSettlementFieldsCardHtml('Records show ' + fmtINR2(outstandingAmt) + ' — enter the actual figure as on the settlement date.')
     + '<div id="otsAppPreviewWrap"></div>';
-  otsAppAnimateCountUp(document.getElementById('otsAppLoanAmtStat'), loanAmt, fmtINR2);
-  otsAppAnimateCountUp(document.getElementById('otsAppOutstandingStat'), outstandingAmt, fmtINR2);
+
+  wrap.innerHTML = html;
+  rows.forEach((row, idx)=>{
+    const loanAmt = Number(row[C.SANCT_LIM])||0;
+    const outstandingAmt = Number(row[C.OUTBAL])||0;
+    otsAppAnimateCountUp(document.getElementById(otsAppFieldId('otsAppLoanAmtStat', idx)), loanAmt, fmtINR2);
+    otsAppAnimateCountUp(document.getElementById(otsAppFieldId('otsAppOutstandingStat', idx)), outstandingAmt, fmtINR2);
+  });
   otsAppSetStep('details');
 }
 function renderOtsApplicationView(){

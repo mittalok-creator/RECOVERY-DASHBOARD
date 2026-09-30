@@ -968,6 +968,8 @@ main{padding:20px 16px 40px}
 .ots-app-ready-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#fff;background:var(--green);padding:4px 11px;border-radius:999px;animation:otsAppBadgeIn .4s var(--ease) .1s both}
 .ots-app-letter-paper{overflow-x:auto;border-radius:12px;box-shadow:0 14px 34px rgba(0,0,0,.16);animation:otsAppPopIn .5s var(--ease) .1s both}
 .ots-app-letter-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.ots-app-letter-caption{font-size:12px;font-weight:800;color:var(--sub);margin:20px 0 8px}
+.ots-app-letter-actions+.ots-app-letter-caption{margin-top:16px}
 .ots-app-btn-pill{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 16px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-weight:700;font-size:12px;cursor:pointer;transition:transform .18s var(--ease),box-shadow .18s var(--ease),background .18s var(--ease);white-space:nowrap}
 .ots-app-btn-pill:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.12)}
 .ots-app-btn-pill:active{transform:translateY(0) scale(.98)}
@@ -1703,6 +1705,15 @@ footer.app-foot{display:none;text-align:center;padding:26px 18px calc(28px + env
   .kccov-print-wrap .bifurcation-table thead{display:table-header-group}
   .kccov-print-wrap .bifurcation-table tr{page-break-inside:avoid}
   .kccov-print-wrap .bifurcation-scroll{max-height:none;overflow:visible}
+  /* Application Form's combined multi-account print job (otsAppPrint()
+     concatenates one .ots-app-letter-page per linked account into this
+     same #printArea) -- one real page break between each letter so
+     printing/saving a customer's several accounts together doesn't run
+     one letter into the next. Scoped to .ots-app-print-wrap so it can
+     never affect any other print job sharing #printArea; for a single
+     letter this selector simply has no sibling to not-match, so a
+     1-account customer prints exactly as it always did. */
+  .ots-app-print-wrap .ots-app-letter-page:not(:last-child){page-break-after:always}
 }
 
 /* ==================================================================
