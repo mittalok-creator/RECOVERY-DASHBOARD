@@ -6088,6 +6088,87 @@ function updateDashTitle(){
   el.textContent = first ? `UPGB ${titleCase(String(first[C.REGION]))} region NPA Portfolio` : 'UPGB NPA Portfolio';
 }
 
+/* ---------- Dashboard: "view NPA as of a past date" (2026-09-30) ----------
+   Ported from NPA-DASHBOARD's own same-day round -- this portal never
+   uploads/publishes its own data, so this is read-only, cross-origin, the
+   exact same pattern already used for KCC Overdue/SMA/PNPA. Reads
+   data/npa-branch-history.json, captured by NPA-DASHBOARD on every Publish
+   -- deliberately limited to branch/Sol ID/count/O/S per day, no account-
+   level drill-down for a past date. No OTS Calculator exists in this
+   portal at all, so there's no otsBook-equivalent split to port. */
+function isoToDisplay(iso){
+  const p = String(iso||'').split('-');
+  return p.length===3 ? `${p[2]}-${p[1]}-${p[0]}` : String(iso||'');
+}
+let __npaHistoryDoc = null;
+async function ensureNpaHistoryDoc(){
+  if(__npaHistoryDoc) return __npaHistoryDoc;
+  const doc = await fetchJson(DATA_ORIGIN + 'data/npa-branch-history.json?t=' + Date.now());
+  __npaHistoryDoc = (doc && Array.isArray(doc.entries)) ? doc : {entries:[]};
+  return __npaHistoryDoc;
+}
+let __npaHistoryPickerInited = false;
+async function initNpaHistoryPickerOnce(){
+  if(__npaHistoryPickerInited) return;
+  __npaHistoryPickerInited = true;
+  const input = document.getElementById('npaHistoryDateInput');
+  if(!input) return;
+  try{
+    const doc = await ensureNpaHistoryDoc();
+    if(!doc.entries.length) return;
+    const dates = doc.entries.map(e=>e.date);
+    input.min = dates[0]; input.max = dates[dates.length-1];
+    const earlier = dates.filter(d=>d < (DATA.asOnDate||dates[dates.length-1]));
+    input.value = earlier.length ? earlier[earlier.length-1] : dates[dates.length-1];
+    onNpaHistoryDateChange();
+  } catch(err){ /* non-critical -- picker just stays empty */ }
+}
+async function onNpaHistoryDateChange(){
+  const input = document.getElementById('npaHistoryDateInput');
+  const wrap = document.getElementById('npaHistoryTableWrap');
+  if(!input || !wrap || !input.value) return;
+  wrap.innerHTML = '<div style="padding:10px;color:var(--sub)">Loading…</div>';
+  try{
+    const doc = await ensureNpaHistoryDoc();
+    renderNpaHistoryTable(doc.entries.find(e=>e.date===input.value), input.value);
+  } catch(err){
+    wrap.innerHTML = `<div class="upload-status err">Could not load history: ${esc(err.message||err)}</div>`;
+  }
+}
+function renderNpaHistoryTable(entry, dateVal){
+  const wrap = document.getElementById('npaHistoryTableWrap');
+  if(!wrap) return;
+  if(!entry){
+    wrap.innerHTML = `<div style="padding:10px;color:var(--sub)">No figures captured for ${esc(isoToDisplay(dateVal))}.</div>`;
+    return;
+  }
+  const sorted = [...entry.branches].sort((a,b)=>b.os-a.os);
+  wrap.innerHTML = `<div class="dash-table-wrap"><table class="dash-table">
+    <thead><tr><th>Branch</th><th>Sol ID</th><th>Accounts</th><th>Outstanding</th></tr></thead>
+    <tbody>${sorted.map(b=>`<tr><td>${esc(b.branchName)}</td><td>${esc(b.solId)}</td><td>${b.count.toLocaleString('en-IN')}</td><td>${fmtCr(b.os)}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><td><b>Total</b></td><td></td><td><b>${entry.totalCount.toLocaleString('en-IN')}</b></td><td><b>${fmtCr(entry.totalOs)}</b></td></tr></tfoot>
+  </table></div>`;
+}
+async function exportNpaBranchHistory(){
+  let doc;
+  try{ doc = await fetchJson(DATA_ORIGIN + 'data/npa-branch-history.json?t=' + Date.now()); }
+  catch(err){
+    if(err && err.message === 'HTTP 404'){ showToast('No NPA history captured yet.'); return; }
+    showToast('Could not load NPA daily history.'); return;
+  }
+  const entries = (doc && doc.entries) || [];
+  if(!entries.length){ showToast('No NPA history captured yet.'); return; }
+  const headers = ['Date','Sol ID','Branch','Accounts','Outstanding (Lakh)'];
+  const rows = [];
+  entries.forEach(e=>{
+    e.branches.forEach(b=>{
+      rows.push([ isoToDisplay(e.date), b.solId, b.branchName, b.count, +(b.os/100000).toFixed(2) ]);
+    });
+  });
+  await exportRowsToExcel('UPGB_NPA_Daily_Branch_History.xlsx', 'NPA Daily History', headers, rows, [null,null,null,null,'0.00']);
+}
+window.exportNpaBranchHistory = exportNpaBranchHistory;
+
 function svgDonut(segments, size){
   size = size || 130;
   const strokeW = 18;
@@ -8977,7 +9058,7 @@ function switchView(view){
     document.querySelectorAll('.view').forEach(v=>{ v.classList.toggle('active', v.dataset.view===view); v.classList.remove('view-leave'); });
     document.querySelectorAll('.nav-item[data-view]').forEach(b=>b.classList.toggle('active',
       b.dataset.view===view || (UTILITY_CHILD_VIEWS.includes(view) && b.dataset.view==='utility')));
-    if(view==='dashboard') renderDashboard();
+    if(view==='dashboard'){ renderDashboard(); initNpaHistoryPickerOnce(); }
     if(view==='pnpa') renderPnpaDashboard();
     if(view==='pnpaslip') renderPnpaSlipView();
     if(view==='kccov') renderKccOverdue();
