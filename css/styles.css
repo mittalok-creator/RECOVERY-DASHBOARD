@@ -211,6 +211,7 @@
   --tool-indigo:#6F82F5; --tool-indigo-soft:rgba(111,130,245,.16);
   --tool-gold:#C99A3B; --tool-gold-soft:rgba(201,154,59,.16);
   --tool-jade:#3ECF7A; --tool-jade-soft:rgba(62,207,122,.16);
+  --tool-coral:#E8563E; --tool-coral-soft:rgba(232,86,62,.16);
   --emboss-rim:rgba(255,255,255,.05);
   --gold:#3A7BFF; --gold-l:#7FB0FF; --gold-d:#245BFF; --gold-soft:rgba(58,123,255,.12);
 
@@ -2098,12 +2099,17 @@ html,body{overscroll-behavior:none}
   gap:10px 16px;text-align:left;position:relative;margin-top:auto;padding-top:2px}
 .hero-kpi-side>*{margin-top:0}
 .hero-kpi-badge{padding:6px 12px;border-radius:10px;font-size:16px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.3px;white-space:nowrap}
-.hero-kpi-corner-stats{text-align:left;display:flex;flex-wrap:wrap;gap:8px 18px}
-.hero-kpi-corner-group{margin-top:0}
-.hero-kpi-corner-row{font-size:11px;color:var(--ink-mute);font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
-.hero-kpi-corner-row span{text-transform:uppercase;letter-spacing:.4px;margin-right:5px}
-.hero-kpi-corner-row b{color:var(--ink);font-weight:800}
-.hero-kpi-corner-gap{font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:1px;white-space:nowrap}
+/* Target & Gap hero tile (2026-09-30) -- three compact rows (Mar'26/this
+   month/FY-end target) replacing the old corner-stats overlay + separate
+   npa-target-strip, both removed. Sits inside .hero-kpi-main like every
+   other hero card's own content, just with rows instead of one big value. */
+.hero-target-rows{display:flex;flex-direction:column;gap:7px;margin-top:8px}
+.hero-target-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:7px;border-top:1px solid var(--line)}
+.hero-target-row:first-child{padding-top:0;border-top:none}
+.hero-target-row .lbl{display:block;font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--sub)}
+.hero-target-row .val{display:block;font-size:14px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+.hero-target-row .val.muted{font-size:12.5px;font-weight:700;color:var(--ink-mute)}
+.hero-target-row .gap{font-size:12px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
 .bank-hero-row{grid-template-columns:repeat(3,1fr)}
 @media (max-width:1023px){ .hero-kpi-row{grid-template-columns:repeat(2,1fr)} }
 @media (max-width:599px){
@@ -2229,16 +2235,56 @@ html,body{overscroll-behavior:none}
    (Alok's own framing, 2026-09-25: "treat it like the whole website"). */
 .recovery-branch-lock{display:inline-flex;align-items:center;font-size:15px;font-weight:800;color:var(--ink);letter-spacing:.2px}
 
-/* ---------- Recovery Dashboard (branch portal): NPA position strip
-   (Dashboard view only -- moved off the PNPA Slippage page per Alok's own
-   correction, 2026-09-25: these are NPA-position figures, not slippage
-   figures) ---------- */
-.npa-target-strip{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0 18px}
-.npa-target-tile{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-md);padding:12px 14px;display:flex;flex-direction:column;gap:4px}
-.npa-target-tile .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--sub);font-weight:800}
-.npa-target-tile .val{font-size:17px;font-weight:800;color:var(--ink)}
-.npa-target-tile .val.muted{font-size:12.5px;font-weight:700;color:var(--ink-mute)}
-.npa-target-tile .val-sub{font-size:11.5px;font-weight:700}
+/* ---------- Recovery Dashboard (branch portal): Dashboard cross-tab
+   module cards (2026-09-30) -- PNPA Slippage / KCC Overdue / SMA, one card
+   each, directly below the NPA hero row. Deliberately its own card shape
+   rather than reusing .hero-kpi-card verbatim: these need a taller, more
+   varied body (chips, a share bar, a small legend) that the fixed
+   icon->label->value->sub hero template doesn't fit, but they borrow the
+   same --hero-tint/--hero-color custom-property technique for their top
+   accent bar and corner-tint wash, so the whole Dashboard reads as one
+   consistent design language. Replaces the old .npa-target-strip, which
+   this same information used to live in before being folded into the
+   Target & Gap hero tile. ---------- */
+.dash-module-row{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px}
+.dash-module-card{
+  background:var(--glass-fill);backdrop-filter:blur(24px) saturate(170%);-webkit-backdrop-filter:blur(24px) saturate(170%);
+  border:1px solid var(--glass-border);border-radius:var(--radius-xl);padding:20px 20px 16px;
+  box-shadow:var(--shadow-sm);position:relative;overflow:hidden;
+  display:flex;flex-direction:column;gap:14px;
+  animation:riseIn .5s var(--ease) both;
+  transition:transform .22s var(--ease),box-shadow .22s var(--ease),border-color .22s var(--ease);
+}
+.dash-module-row .dash-module-card:nth-child(1){animation-delay:.02s}
+.dash-module-row .dash-module-card:nth-child(2){animation-delay:.08s}
+.dash-module-row .dash-module-card:nth-child(3){animation-delay:.14s}
+.dash-module-card.clickable{cursor:pointer}
+.dash-module-card.clickable:hover{transform:translateY(-4px);box-shadow:var(--shadow);border-color:var(--glass-hi)}
+.dash-module-card::before{content:"";position:absolute;inset:0;background:radial-gradient(140px 100px at 12% -10%, var(--hero-tint,var(--accent-soft)) 0%, transparent 72%);pointer-events:none}
+.dash-module-card::after{content:"";position:absolute;top:0;left:0;right:0;height:3px;pointer-events:none;background:linear-gradient(90deg,var(--hero-color,var(--accent)),transparent 85%);opacity:.85}
+.dash-module-head{display:flex;align-items:center;gap:10px;position:relative}
+.dash-module-icon{width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;background:var(--hero-tint,var(--accent-soft));color:var(--hero-color,var(--accent));flex-shrink:0}
+.dash-module-icon svg{width:18px;height:18px}
+.dash-module-title{font-size:15px;font-weight:800;color:var(--ink)}
+.dash-module-stat{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;position:relative}
+.dash-module-big{font-size:26px;font-weight:800;color:var(--ink);letter-spacing:-.5px;font-variant-numeric:tabular-nums;line-height:1}
+.dash-module-statlbl{font-size:12.5px;color:var(--ink-mute);font-weight:600}
+.dash-module-chips{display:flex;flex-wrap:wrap;gap:6px}
+.dash-module-chip{background:var(--gauge-track);color:var(--ink-mute);font-size:11px;font-weight:700;border-radius:999px;padding:4px 10px;white-space:nowrap}
+.dash-module-bar{display:flex;width:100%;height:10px;border-radius:999px;overflow:hidden;background:var(--gauge-track)}
+.dash-module-legend{display:flex;flex-direction:column;gap:5px}
+.dash-module-legend-row{display:flex;align-items:center;justify-content:space-between;font-size:11.5px;color:var(--ink-mute);gap:8px}
+.dash-module-legend-row span:first-child{display:flex;align-items:center;gap:6px}
+.dash-module-legend-row span:last-child{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dash-module-dot{width:8px;height:8px;border-radius:999px;display:inline-block;flex-shrink:0}
+.dash-module-note-box{font-size:10.5px;color:var(--ink-mute);background:var(--gauge-track);border-radius:8px;padding:6px 9px}
+.dash-module-empty{font-size:12.5px;color:var(--ink-mute);font-weight:600;padding:6px 0 2px}
+.dash-module-loading{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--ink-mute);padding:8px 0}
+.dash-module-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:auto;padding-top:10px;border-top:1px solid var(--line);position:relative}
+.dash-module-note{font-size:11px;color:var(--ink-mute)}
+.dash-module-cta{font-size:12px;font-weight:700;color:var(--hero-color,var(--accent));white-space:nowrap}
+@media (max-width:1023px){ .dash-module-row{grid-template-columns:1fr 1fr} }
+@media (max-width:699px){ .dash-module-row{grid-template-columns:1fr} }
 
 /* ---------- Recovery Dashboard (branch portal): PNPA Slippage ---------- */
 .pnpa-today-hero{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-md);padding:16px 16px 14px;margin-bottom:16px}
@@ -2558,6 +2604,7 @@ header.app-head::before,.detail-head::before{
   --tool-indigo:#4152C9; --tool-indigo-soft:rgba(65,82,201,.10);
   --tool-gold:#8A6A1E; --tool-gold-soft:rgba(138,106,30,.10);
   --tool-jade:#1F8F58; --tool-jade-soft:rgba(31,143,88,.10);
+  --tool-coral:#B33F2C; --tool-coral-soft:rgba(179,63,44,.10);
   --emboss-rim:rgba(255,255,255,.75);
   --gold:#1B4FE0; --gold-l:#3A7BFF; --gold-d:#123A9E; --gold-soft:rgba(27,79,224,.08);
   --stripe:rgba(62,50,30,.024); --stripe-label:rgba(62,50,30,.035);

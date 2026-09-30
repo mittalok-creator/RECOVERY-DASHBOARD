@@ -87,8 +87,8 @@ DATA.branchAdvances = DATA.branchAdvances || {};
 /* Branch/Region NPA Target for the fiscal year, uploaded on NPA-DASHBOARD's
    own Settings -> Update Data -> "Branch/Region NPA Target" panel -- this
    portal has no upload of its own, it only ever reads whatever the main
-   app has Published. Powers dashboardNpaTargetStrip()'s "Target for <final
-   month>" tile below. */
+   app has Published. Powers dashboardTargetGapCard()'s "Target & Gap" hero
+   tile below. */
 DATA.branchTargets = DATA.branchTargets || {};
 /* Branch Manager / Recovery Officer contacts -- keyed by Sol ID (string),
    uploaded via Update Data -> Branch Contacts. Same "own slow-moving
@@ -6434,6 +6434,13 @@ const ICON_MAP = '<path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 
 const ICON_STAR = '<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>';
 const ICON_TARGET = '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>';
 const ICON_NOTE = '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1 1.11-1.79l1-.5a2 2 0 0 1 1.78 0l1 .5A2 2 0 0 1 15 10.76V15H9Z"/><path d="M8 15h8l1 2H7l1-2Z"/>';
+// Dashboard cross-tab module cards (2026-09-30) -- KCC Overdue's own nav
+// icon is this clock face; SMA Dashboard's module card uses a small radar
+// glyph rather than reusing ICON_ALERT_TRIANGLE (already the PNPA
+// Slippage module's icon, and also SMA's own real nav icon today -- picking
+// a distinct glyph here just avoids two identical icons in the same row).
+const ICON_CLOCK = '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>';
+const ICON_RADAR = '<path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="6.2"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/>';
 function svgIcon(pathData){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${pathData}</svg>`; }
 
 function heroKpiCard(opts){
@@ -6523,53 +6530,54 @@ window.showHighValueCustList = showHighValueCustList;
    against THOSE branches' current O/S), same safeguard as the advance
    aggregation just above -- so a partial upload never produces a
    misleading gap by comparing against branches with no baseline. */
-function dashboardCornerStats(s){
-  let marOS=0, marBase=0, marN=0, junOS=0, junBase=0, junN=0;
-  s.branchMap.forEach((v)=>{
-    const rec = DATA.branchAdvances[v.solId];
-    if(rec && rec.npaMar26!=null){ marOS+=v.os; marBase+=rec.npaMar26; marN++; }
-    if(rec && rec.npaJun26!=null){ junOS+=v.os; junBase+=rec.npaJun26; junN++; }
-  });
-  if(!marN && !junN) return '';
-  const gapLine = (v) => { const improved = v<=0; return `<span style="color:${improved?'var(--green)':'var(--red)'}">${improved?'▼':'▲'} ${fmtCr(Math.abs(v))}</span>`; };
-  let html = '<div class="hero-kpi-corner-stats">';
-  if(marN) html += `<div class="hero-kpi-corner-group"><div class="hero-kpi-corner-row"><span>Mar</span><b>${fmtCr(marBase)}</b></div><div class="hero-kpi-corner-gap">${gapLine(marOS-marBase)}</div></div>`;
-  if(junN) html += `<div class="hero-kpi-corner-group"><div class="hero-kpi-corner-row"><span>Jun</span><b>${fmtCr(junBase)}</b></div><div class="hero-kpi-corner-gap">${gapLine(junOS-junBase)}</div></div>`;
-  html += '</div>';
-  return html;
+/* Recovery Dashboard (branch portal) only -- the "Target & Gap" hero tile,
+   2026-09-30: Alok asked to drop the separate Total Accounts tile (its
+   count already shows under Total Outstanding, so it didn't need its own
+   slot) and use that spot for target/gap figures instead -- merging what
+   used to be two separate things: dashboardCornerStats()'s Mar-baseline
+   comparison and dashboardNpaTargetStrip()'s FY-end target tile (both
+   removed, folded into the 3 rows below). Three rows, each an amount vs
+   today's NPA total for this branch: the March 2026 baseline
+   (DATA.branchAdvances.npaMar26), this fiscal month's own target, and the
+   FY-end target -- the last two from DATA.branchTargets once NPA-
+   DASHBOARD's "Branch/Region NPA Target" upload has been Published (same
+   shared cross-origin data this portal reads everything else from). "This
+   month" is found by fiscal-year offset (April = index 0 ... March = 11)
+   rather than string-matching the label text, so it keeps working
+   correctly across a fiscal-year rollover without code changes. Any row
+   whose underlying figure hasn't been uploaded yet shows "Not set yet"
+   rather than a guessed number. */
+function dashboardTargetGapRow(label, rupees, todayNpa){
+  if(rupees==null) return `<div class="hero-target-row"><span class="lbl">${esc(label)}</span><span class="val muted">Not set yet</span></div>`;
+  const gap = todayNpa - rupees;
+  const improved = gap<=0;
+  return `<div class="hero-target-row">
+    <div><span class="lbl">${esc(label)}</span><span class="val">${fmtCr(rupees)}</span></div>
+    <span class="gap" style="color:${improved?'var(--green)':'var(--red)'}">${improved?'▼':'▲'} ${fmtCr(Math.abs(gap))}</span>
+  </div>`;
 }
-/* Recovery Dashboard (branch portal) only -- Today's NPA total, the gap
-   against the existing March 2026 baseline (DATA.branchAdvances/npaMar26,
-   the same figure dashboardCornerStats() above already shows in
-   miniature), and the branch's own FY-end NPA target -- now a real figure
-   once NPA-DASHBOARD's "Branch/Region NPA Target" upload has been
-   Published (DATA.branchTargets, same shared cross-origin data this
-   portal already reads everything else from), shown as "Not set yet"
-   only when that upload genuinely hasn't happened for this branch. The
-   final month in the uploaded target series is used (not hardcoded to
-   "March 2027") so a future fiscal year's re-upload with a different
-   final month still shows correctly with no code change here. These are
-   all NPA-position figures, not slippage figures, so they belong here on
-   the Dashboard rather than on the PNPA Slippage page (Alok's own
-   correction, 2026-09-25 -- they had briefly been placed there instead). */
-function dashboardNpaTargetStrip(branchName){
+function dashboardTargetGapCard(todayNpa){
   const solId = loggedInSolId();
-  const todayNpa = computeDashboardStats(branchName || null).totalOS;
   const adv = solId ? DATA.branchAdvances[String(solId)] : null;
-  const marGapHtml = (adv && adv.npaMar26!=null)
-    ? (()=>{ const gap = todayNpa - adv.npaMar26; const improved = gap<=0;
-        return `<div class="npa-target-tile"><span class="lbl">Gap from March 2026</span><span class="val" style="color:${improved?'var(--green)':'var(--red)'}">${improved?'▼':'▲'} ${fmtCr(Math.abs(gap))}</span></div>`; })()
-    : `<div class="npa-target-tile"><span class="lbl">Gap from March 2026</span><span class="val muted">Baseline not uploaded</span></div>`;
   const bTargets = solId && DATA.branchTargets && DATA.branchTargets.branches ? DATA.branchTargets.branches[String(solId)] : null;
-  const finalTarget = bTargets && bTargets.targets && bTargets.targets.length ? bTargets.targets[bTargets.targets.length-1] : null;
-  const targetTileHtml = (finalTarget && finalTarget.rupees!=null)
-    ? (()=>{ const gap = todayNpa - finalTarget.rupees; const improved = gap<=0;
-        return `<div class="npa-target-tile"><span class="lbl">Target for ${esc(finalTarget.label)}</span><span class="val">${fmtCr(finalTarget.rupees)}</span><span class="val-sub" style="color:${improved?'var(--green)':'var(--red)'}">${improved?'▼':'▲'} ${fmtCr(Math.abs(gap))}</span></div>`; })()
-    : `<div class="npa-target-tile"><span class="lbl">Target for March 2027</span><span class="val muted">Not set yet</span></div>`;
-  return `<div class="npa-target-strip">
-    <div class="npa-target-tile"><span class="lbl">Today's NPA</span><span class="val">${fmtCr(todayNpa)}</span></div>
-    ${marGapHtml}
-    ${targetTileHtml}
+  const marRupees = (adv && adv.npaMar26!=null) ? adv.npaMar26 : null;
+  let thisMonthTarget = null, finalTarget = null;
+  if(bTargets && bTargets.targets && bTargets.targets.length){
+    const fiscalIdx = (new Date().getMonth()+9) % 12; // April=0 ... March=11
+    thisMonthTarget = bTargets.targets[fiscalIdx] || null;
+    finalTarget = bTargets.targets[bTargets.targets.length-1] || null;
+  }
+  const rowsHtml = [
+    dashboardTargetGapRow("Mar'26", marRupees, todayNpa),
+    dashboardTargetGapRow(thisMonthTarget ? `This Month · ${thisMonthTarget.label}` : 'This Month', thisMonthTarget ? thisMonthTarget.rupees : null, todayNpa),
+    dashboardTargetGapRow(finalTarget ? `${finalTarget.label} Target` : 'FY-end Target', finalTarget ? finalTarget.rupees : null, todayNpa),
+  ].join('');
+  return `<div class="hero-kpi-card" style="--hero-tint:var(--gauge-track);--hero-color:var(--accent-2)">
+    <div class="hero-kpi-main" style="flex:1">
+      <div class="hero-kpi-icon">${svgIcon(ICON_TARGET)}</div>
+      <div class="hero-kpi-label">Target &amp; Gap</div>
+      <div class="hero-target-rows">${rowsHtml}</div>
+    </div>
   </div>`;
 }
 
@@ -6690,7 +6698,6 @@ function renderDashboard(){
     if(rec && rec.adv>0){ advOsSum+=v.os; advSum+=rec.adv; advBranchCount++; }
   });
   const aggNpaPct = advSum>0 ? (advOsSum/advSum*100) : null;
-  const heroCorner = dashboardCornerStats(s);
   let heroNpaBadge = '';
   if(aggNpaPct!==null){
     const sev = npaPctSeverity(aggNpaPct);
@@ -6706,13 +6713,16 @@ function renderDashboard(){
 
   el.innerHTML = `
     ${dashboardBranchInfoCard(branchFilter, s)}
-    ${lockedBranch ? dashboardNpaTargetStrip(lockedBranch) : ''}
+    <div class="section-label">NPA Book — as on ${fmtAsOnDisplay()}</div>
     <div class="hero-kpi-row">
-      ${heroKpiCard({id:'heroTotalOs', label:'Total Outstanding', fallback:fmtCr(s.totalOS), sub:s.totalAccounts.toLocaleString('en-IN')+' accounts', icon:ICON_BANKNOTE, tint:'var(--accent-soft)', color:'var(--accent)', badge:heroNpaBadge, corner:heroCorner})}
-      ${heroKpiCard({id:'heroTotalAccts', label:'Total Accounts', fallback:s.totalAccounts.toLocaleString('en-IN'), sub:s.custCount.toLocaleString('en-IN')+' unique customers', icon:ICON_USERS, tint:'var(--gauge-track)', color:'var(--accent-2)'})}
+      ${heroKpiCard({id:'heroTotalOs', label:'Total Outstanding', fallback:fmtCr(s.totalOS), sub:s.totalAccounts.toLocaleString('en-IN')+' accounts', icon:ICON_BANKNOTE, tint:'var(--accent-soft)', color:'var(--accent)', badge:heroNpaBadge})}
+      ${dashboardTargetGapCard(s.totalOS)}
       ${heroKpiCard({id:'heroHighRisk', label:'High-Risk Exposure', fallback:fmtCr(highRiskOS), sub:'DA3 + Loss · '+highRiskPct.toFixed(1)+'% of book', icon:ICON_ALERT_TRIANGLE, tint:'var(--red-soft)', color:'var(--red)', onclick:(s.assetMix.LOSS||s.assetMix.DA3)?`showAssetList('${s.assetMix.LOSS?'LOSS':'DA3'}')`:''})}
       ${heroKpiCard({id:'heroAvgTicket', label:'Average Ticket Size', fallback:fmtINR2(avgTicket), sub:'per account, this book', icon:ICON_TICKET, tint:'var(--amber-soft)', color:'var(--amber)'})}
     </div>
+
+    <div class="section-label">${lockedBranch ? `Everything for ${esc(lockedBranch)}` : 'Everything across the region'}<span class="chart-sub">updated automatically</span></div>
+    <div class="dash-module-row" id="dashModuleRow">${dashboardModuleRowHtml()}</div>
 
     ${topBucket ? `
     <div class="insight-strip clickable" onclick="showBucketList('${topBucket.id}')">
@@ -6819,12 +6829,137 @@ function renderDashboard(){
 
   const heroOs = document.getElementById('heroTotalOs');
   if(heroOs) animateNumber(heroOs, 0, s.totalOS, fmtCr, 900);
-  const heroAccts = document.getElementById('heroTotalAccts');
-  if(heroAccts) animateNumber(heroAccts, 0, s.totalAccounts, n=>Math.round(n).toLocaleString('en-IN'), 900);
   const heroRisk = document.getElementById('heroHighRisk');
   if(heroRisk) animateNumber(heroRisk, 0, highRiskOS, fmtCr, 900);
   const heroTicket = document.getElementById('heroAvgTicket');
   if(heroTicket) animateNumber(heroTicket, 0, avgTicket, fmtINR2, 900);
+
+  // Cross-tab module row (PNPA Slippage / KCC Overdue / SMA) -- each of
+  // these lives in its own dataset, fetched lazily by its own tab and not
+  // guaranteed to be loaded yet the first time the Dashboard renders. Kick
+  // off a background, non-blocking fetch for whichever one(s) aren't
+  // already in memory, then re-render just the module row (never the
+  // whole Dashboard) as each arrives -- the rest of the page never waits
+  // on a cross-origin fetch.
+  dashboardEnsureCrossTabSummaries(()=>{
+    const row = document.getElementById('dashModuleRow');
+    if(row) row.innerHTML = dashboardModuleRowHtml();
+  });
+}
+
+/* ---------- Dashboard cross-tab module cards (2026-09-30) ----------
+   PNPA Slippage / KCC Overdue / SMA, each summarized in one small card
+   directly below the NPA hero row, click-through to its own full tab.
+   Each card reuses that tab's own already-proven branch-lock technique
+   (KCCOV_BRANCH_SOL name-resolution for KCC Overdue, direct Sol ID match
+   for SMA, pnpaLoggedInBranchName() for PNPA) rather than a second,
+   independently-derived computation -- so these figures are guaranteed to
+   match exactly what the user sees a moment later after clicking through.
+   Each dataset is fetched lazily and independently (see
+   dashboardEnsureCrossTabSummaries() below); a card shows its own loading
+   state until its data arrives, so the rest of the Dashboard never waits
+   on three extra cross-origin fetches. */
+function dashboardModuleCard(opts){
+  return `<div class="dash-module-card${opts.onclick?' clickable':''}"${opts.onclick?` onclick="${opts.onclick}"`:''} style="--hero-tint:${opts.tint};--hero-color:${opts.color}">
+    <div class="dash-module-head">
+      <div class="dash-module-icon">${svgIcon(opts.icon)}</div>
+      <div class="dash-module-title">${esc(opts.title)}</div>
+    </div>
+    ${opts.body}
+    <div class="dash-module-foot">
+      <span class="dash-module-note">${opts.note||''}</span>
+      <span class="dash-module-cta">View full tab →</span>
+    </div>
+  </div>`;
+}
+function dashboardModuleLoadingCard(icon, tint, color, title){
+  return `<div class="dash-module-card" style="--hero-tint:${tint};--hero-color:${color}">
+    <div class="dash-module-head">
+      <div class="dash-module-icon">${svgIcon(icon)}</div>
+      <div class="dash-module-title">${esc(title)}</div>
+    </div>
+    <div class="dash-module-loading"><div class="data-loading-spinner" aria-hidden="true" style="position:static;width:22px;height:22px;border-width:2.5px"></div><span>Loading…</span></div>
+  </div>`;
+}
+function dashboardEnsureCrossTabSummaries(onUpdate){
+  if(PNPA_DATA) onUpdate(); else ensurePnpaDataLoaded(onUpdate, onUpdate);
+  if(KCC_OVERDUE_DATA) onUpdate(); else {
+    fetchJson(DATA_ORIGIN + 'data/kcc-overdue.json?t=' + Date.now())
+      .then(d => { KCC_OVERDUE_DATA = d; onUpdate(); })
+      .catch(onUpdate);
+  }
+  if(SMA_DATA) onUpdate(); else {
+    fetchJson(DATA_ORIGIN + 'data/sma.json?t=' + Date.now())
+      .then(d => { SMA_DATA = d; onUpdate(); })
+      .catch(onUpdate);
+  }
+}
+function dashboardKccOverdueLockedRows(d){
+  const allBranches = [...new Set(d.rows.map(r=>r[KC.BRANCH]))];
+  const lockedSolId = loggedInSolId();
+  const lockedBranch = lockedSolId ? (allBranches.find(b=>String(KCCOV_BRANCH_SOL[String(b).toUpperCase()])===String(lockedSolId)) || SOL_TO_BRANCH_NAME[String(lockedSolId)] || null) : null;
+  return lockedBranch ? d.rows.filter(r=>r[KC.BRANCH]===lockedBranch) : d.rows;
+}
+function dashboardSmaLockedRows(d){
+  const lockedSolId = loggedInSolId();
+  return lockedSolId ? d.rows.filter(r=>String(r[SR.SOL_ID])===String(lockedSolId)) : d.rows;
+}
+function dashboardPnpaModuleCard(){
+  if(!PNPA_DATA) return dashboardModuleLoadingCard(ICON_ALERT_TRIANGLE, 'var(--tool-coral-soft)', 'var(--tool-coral)', "Today's PNPA Slippage");
+  const branch = pnpaLoggedInBranchName(PNPA_DATA.rows);
+  const { totals } = pnpaAggregateToday(PNPA_DATA.rows, branch, new Date());
+  const body = totals.all.cnt ? `
+    <div class="dash-module-stat"><span class="dash-module-big" style="color:var(--tool-coral)">${totals.all.cnt.toLocaleString('en-IN')}</span><span class="dash-module-statlbl">account${totals.all.cnt===1?'':'s'} slipped into NPA today</span></div>
+    <div class="dash-module-chips">
+      <span class="dash-module-chip" style="background:var(--tool-coral-soft);color:var(--tool-coral)">${fmtCr(totals.all.amt)}</span>
+      ${totals.kcc.cnt ? `<span class="dash-module-chip">${totals.kcc.cnt.toLocaleString('en-IN')} KCC</span>` : ''}
+      ${totals.nonkcc.cnt ? `<span class="dash-module-chip">${totals.nonkcc.cnt.toLocaleString('en-IN')} Non-KCC</span>` : ''}
+    </div>` : `<div class="dash-module-empty">No new slippage today — quiet day so far.</div>`;
+  return dashboardModuleCard({icon:ICON_ALERT_TRIANGLE, tint:'var(--tool-coral-soft)', color:'var(--tool-coral)', title:"Today's PNPA Slippage", body, note:`As on ${fmtDate(new Date())}`, onclick:`switchView('pnpaslip')`});
+}
+function dashboardKccOverdueModuleCard(){
+  if(!KCC_OVERDUE_DATA) return dashboardModuleLoadingCard(ICON_CLOCK, 'var(--tool-gold-soft)', 'var(--tool-gold)', 'KCC Overdue');
+  const rows = dashboardKccOverdueLockedRows(KCC_OVERDUE_DATA);
+  if(!rows.length) return dashboardModuleCard({icon:ICON_CLOCK, tint:'var(--tool-gold-soft)', color:'var(--tool-gold)', title:'KCC Overdue', body:'<div class="dash-module-empty">No KCC Overdue accounts for this branch this period.</div>', onclick:`switchView('kccov')`});
+  let totalOs = 0;
+  const bucketTotals = {};
+  KCC_OVERDUE_SCHEMES.forEach(s=>{ bucketTotals[s.key] = {count:0, os:0}; });
+  rows.forEach(r=>{
+    totalOs += r[KC.OS];
+    const key = kccOverdueBucketOf(r[KC.SCHEME]);
+    if(key){ bucketTotals[key].count++; bucketTotals[key].os += r[KC.OS]; }
+  });
+  const barHtml = `<div class="dash-module-bar">${KCC_OVERDUE_SCHEMES.map((s,i)=>{
+    const pct = totalOs ? (bucketTotals[s.key].os/totalOs*100) : 0;
+    return pct ? `<div style="width:${pct.toFixed(2)}%;background:var(--tool-gold);opacity:${(1-i*0.3).toFixed(2)}"></div>` : '';
+  }).join('')}</div>`;
+  const legendHtml = KCC_OVERDUE_SCHEMES.map((s,i)=>`<div class="dash-module-legend-row"><span><span class="dash-module-dot" style="background:var(--tool-gold);opacity:${(1-i*0.3).toFixed(2)}"></span>${esc(s.label)}</span><span>${bucketTotals[s.key].count.toLocaleString('en-IN')} · ${fmtCr(bucketTotals[s.key].os)}</span></div>`).join('');
+  const body = `<div class="dash-module-stat"><span class="dash-module-big">${fmtCr(totalOs)}</span><span class="dash-module-statlbl">${rows.length.toLocaleString('en-IN')} accounts overdue</span></div>
+    ${barHtml}
+    <div class="dash-module-legend">${legendHtml}</div>`;
+  return dashboardModuleCard({icon:ICON_CLOCK, tint:'var(--tool-gold-soft)', color:'var(--tool-gold)', title:'KCC Overdue', body, note:'Every filter on that tab shows Average Ticket Size too', onclick:`switchView('kccov')`});
+}
+function dashboardSmaModuleCard(){
+  if(!SMA_DATA) return dashboardModuleLoadingCard(ICON_RADAR, 'var(--tool-violet-soft)', 'var(--tool-violet)', 'SMA Dashboard');
+  const rows = dashboardSmaLockedRows(SMA_DATA);
+  if(!rows.length) return dashboardModuleCard({icon:ICON_RADAR, tint:'var(--tool-violet-soft)', color:'var(--tool-violet)', title:'SMA Dashboard', body:'<div class="dash-module-empty">No SMA accounts for this branch this period.</div>', onclick:`switchView('sma')`});
+  let totalOs = 0, nonFinCount = 0;
+  const stageTotals = {};
+  SMA_STAGES.forEach(s=>{ stageTotals[s.key] = {count:0, os:0}; });
+  rows.forEach(r=>{
+    totalOs += r[SR.OS];
+    const st = SMA_STAGES.find(s=>s.match===r[SR.SMACUST]);
+    if(st){ stageTotals[st.key].count++; stageTotals[st.key].os += r[SR.OS]; }
+    if(r[SR.NON_FINANCIAL]) nonFinCount++;
+  });
+  const legendHtml = SMA_STAGES.map(s=>`<div class="dash-module-legend-row"><span><span class="dash-module-dot" style="background:${s.color}"></span>${esc(s.label)}</span><span>${stageTotals[s.key].count.toLocaleString('en-IN')} · ${fmtCr(stageTotals[s.key].os)}</span></div>`).join('');
+  const body = `<div class="dash-module-stat"><span class="dash-module-big">${fmtCr(totalOs)}</span><span class="dash-module-statlbl">${rows.length.toLocaleString('en-IN')} accounts across SMA-0/1/2</span></div>
+    <div class="dash-module-legend">${legendHtml}</div>
+    <div class="dash-module-note-box">Non-Financial flagged: ${nonFinCount.toLocaleString('en-IN')} account${nonFinCount===1?'':'s'} this period</div>`;
+  return dashboardModuleCard({icon:ICON_RADAR, tint:'var(--tool-violet-soft)', color:'var(--tool-violet)', title:'SMA Dashboard', body, note:`${fmtCr(totalOs)} total exposure`, onclick:`switchView('sma')`});
+}
+function dashboardModuleRowHtml(){
+  return dashboardPnpaModuleCard() + dashboardKccOverdueModuleCard() + dashboardSmaModuleCard();
 }
 
 /* ---------- Daily PNPA (Potential NPA) -- whole-bank, branch-wise, bucketed by scheme ----------
