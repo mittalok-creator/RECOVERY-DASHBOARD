@@ -5331,6 +5331,178 @@ function showToast(msg){
   clearTimeout(__toastTimer);
   __toastTimer = setTimeout(()=>el.classList.remove('show'), 2800);
 }
+
+/* ---------- "Download" tab: NPA-book Excel exports, Branch Split's own
+   "Full NPA Split" format -- ported verbatim from NPA-DASHBOARD's own copy
+   of this same feature (17-column layout, navy header, zebra stripe,
+   frozen row 1, autofilter). The only difference from that app's copy is
+   dlSourceRows() below, which branch-locks to the logged-in Sol ID, same
+   as every other Recovery Dashboard tab. Account NPA Date and Cust NPA
+   Date are both written from the same C.NPA_DT value -- this app's own
+   daily book only ever carries one real NPA date per account. ---------- */
+const DL_OUT_HEADERS = ['Sol','Branch','Account No','Customer ID','Scheme Code','Account Name',
+  'ADDRESS','Balance Amount','Account NPA Date','Cust NPA Date','SBA Account','SBA Balance',
+  'Category','Prov Amt','Sanction Date','Limit','Mobile No'];
+const DL_OUT_WIDTHS = [8,15,16,15,14,40,40,16,16,16,18,14,12,12,14,10,14];
+const DL_CATEGORIES = ['SUB_STD','DA1','DA2','DA3','LOSS'];
+const DL_BRACKET_5L = 500000, DL_BRACKET_10L = 1000000;
+// India's financial year runs April (month index 3) -- March; returns the
+// FY's starting calendar year (e.g. a date in Feb 2027 -> FY 2026-27 -> 2026).
+function dlFyStartYear(d){ return d.getMonth()>=3 ? d.getFullYear() : d.getFullYear()-1; }
+function dlThinBorder(){ const s={style:'thin',color:{argb:'FFCBD5C9'}}; return {top:s,left:s,bottom:s,right:s}; }
+function dlStyleHeaderRow(row, colCount){
+  for(let c=1;c<=colCount;c++){
+    const cell = row.getCell(c);
+    cell.font = { bold:true, color:{argb:'FFFFFFFF'} };
+    cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF2F527D'} };
+    cell.alignment = { vertical:'middle', horizontal:'center' };
+    cell.border = dlThinBorder();
+  }
+  row.height = 20;
+}
+function dlSetDateCell(cell, d){
+  if(d instanceof Date && !isNaN(d)){ cell.value = d; cell.numFmt = 'dd-mm-yyyy'; }
+  else { cell.value = ''; }
+}
+// Writes the full 17-column Branch-Split-format sheet body for one array of
+// C-indexed DATA.npa.rows entries (already filtered/selected by the caller).
+function dlWriteSheet(ws, rows){
+  const hRow = ws.getRow(1);
+  DL_OUT_HEADERS.forEach((h,i)=>{ hRow.getCell(i+1).value = h; });
+  dlStyleHeaderRow(hRow, DL_OUT_HEADERS.length);
+  rows.forEach((r, ri)=>{
+    const row = ws.getRow(ri+2);
+    row.getCell(1).value = r[C.SOL_ID]; row.getCell(2).value = r[C.SOL_DESC];
+    row.getCell(3).value = r[C.ACCT_NO]; row.getCell(3).numFmt = '0';
+    row.getCell(4).value = r[C.CUST_ID]; row.getCell(5).value = r[C.SCHEME];
+    row.getCell(6).value = r[C.NAME]; row.getCell(7).value = r[C.ADDR];
+    row.getCell(8).value = Number(r[C.OUTBAL])||0; row.getCell(8).numFmt = '0.00';
+    const npaDate = toDate(r[C.NPA_DT]);
+    dlSetDateCell(row.getCell(9), npaDate);
+    dlSetDateCell(row.getCell(10), npaDate);
+    const sbBal = Number(r[C.SB_BAL]);
+    row.getCell(11).value = r[C.SB_ACCT];
+    row.getCell(12).value = isFinite(sbBal) ? sbBal : r[C.SB_BAL]; if(isFinite(sbBal)) row.getCell(12).numFmt = '0.00';
+    row.getCell(13).value = r[C.ASSET]; row.getCell(14).value = Number(r[C.PROVISION])||0;
+    dlSetDateCell(row.getCell(15), toDate(r[C.SANCT_DT]));
+    row.getCell(16).value = Number(r[C.SANCT_LIM])||0; row.getCell(17).value = r[C.PHONE];
+    if(ri % 2 === 1){
+      for(let fc=1; fc<=DL_OUT_HEADERS.length; fc++){ row.getCell(fc).fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F5F3'}}; }
+    }
+  });
+  ws.columns.forEach((col,i)=>{ col.width = DL_OUT_WIDTHS[i]; });
+  if(rows.length){ ws.autoFilter = { from:{row:1,column:1}, to:{row:rows.length+1,column:DL_OUT_HEADERS.length} }; }
+}
+// sheets: [{name, rows}] -- builds one workbook, skips any sheet with zero
+// rows (matching Branch Split's own if(catRows.length) convention), same
+// buffer->Blob->anchor->toast download sequence this app already uses
+// elsewhere for its own Excel exports.
+async function dlExportWorkbook(sheets, filename){
+  await ensureExcelJS();
+  const wb = new ExcelJS.Workbook();
+  let any = false;
+  sheets.forEach(s=>{
+    if(!s.rows.length) return;
+    any = true;
+    const ws = wb.addWorksheet(s.name, { views:[{state:'frozen', ySplit:1}] });
+    dlWriteSheet(ws, s.rows);
+  });
+  if(!any){ showToast('No matching accounts found.'); return; }
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 30000);
+  showToast('✓ Workbook exported');
+}
+// Per-customer summed, non-overlapping band -- a household's accounts are
+// summed by Customer ID, then EVERY one of that customer's own account rows
+// (not an aggregated single row) is included if the customer's total falls
+// in [lo, hi). Ported verbatim from branch-split.html's buildNpaBrackets().
+function dlBracketRows(rows, lo, hi){
+  const custTotals = {};
+  rows.forEach(r=>{
+    const cust = String(r[C.CUST_ID]||'').trim();
+    if(!cust) return;
+    custTotals[cust] = (custTotals[cust]||0) + (Number(r[C.OUTBAL])||0);
+  });
+  return rows.filter(r=>{
+    const cust = String(r[C.CUST_ID]||'').trim();
+    if(!cust || !(cust in custTotals)) return false;
+    const t = custTotals[cust];
+    return t>=lo && t<hi;
+  });
+}
+// Branch-locked to the logged-in Sol ID -- the one difference from
+// NPA-DASHBOARD's own copy of this feature, matching every other Recovery
+// Dashboard tab's own branch-lock convention.
+function dlSourceRows(){
+  const solId = loggedInSolId();
+  if(!solId) return DATA.npa.rows;
+  return DATA.npa.rows.filter(r=>String(r[C.SOL_ID])===String(solId));
+}
+function dlExportComplete(){
+  dlExportWorkbook([{name:'NPA_LIST', rows: dlSourceRows()}], 'NPA_Complete_List_' + dateToInputValue(new Date()) + '.xlsx');
+}
+function dlExportAssetCodeWise(){
+  const rows = dlSourceRows();
+  const sheets = DL_CATEGORIES.map(cat=>({ name: cat, rows: rows.filter(r=>r[C.ASSET]===cat) }));
+  dlExportWorkbook(sheets, 'NPA_Asset_Code_Wise_' + dateToInputValue(new Date()) + '.xlsx');
+}
+function dlExport5LPlus(){
+  const rows = dlBracketRows(dlSourceRows(), DL_BRACKET_5L, DL_BRACKET_10L);
+  dlExportWorkbook([{name:'NPA_5L_to_10L', rows}], 'NPA_5Lakh_to_10Lakh_' + dateToInputValue(new Date()) + '.xlsx');
+}
+function dlExport10LPlus(){
+  const rows = dlBracketRows(dlSourceRows(), DL_BRACKET_10L, Infinity);
+  dlExportWorkbook([{name:'NPA_Above_10L', rows}], 'NPA_Above_10Lakh_' + dateToInputValue(new Date()) + '.xlsx');
+}
+function dlExportSbAbove2000(){
+  const rows = dlSourceRows().filter(r=>Number(r[C.SB_BAL])>2000);
+  dlExportWorkbook([{name:'SB_Above_2000', rows}], 'SB_Balance_Above_2000_' + dateToInputValue(new Date()) + '.xlsx');
+}
+function dlExportCurrentMonthSubStd(){
+  const today = new Date();
+  const rows = dlSourceRows().filter(r=>{
+    if(r[C.ASSET]!=='SUB_STD') return false;
+    const d = toDate(r[C.NPA_DT]);
+    return d && d.getFullYear()===today.getFullYear() && d.getMonth()===today.getMonth();
+  });
+  dlExportWorkbook([{name:'CurrentMonth_SubStd', rows}], 'Current_Month_SubStd_' + dateToInputValue(new Date()) + '.xlsx');
+}
+function dlExportThisFY(){
+  const curFy = dlFyStartYear(new Date());
+  const rows = dlSourceRows().filter(r=>{
+    const d = toDate(r[C.NPA_DT]);
+    return d && dlFyStartYear(d)===curFy;
+  });
+  dlExportWorkbook([{name:'This_FY_Accounts', rows}], 'This_FY_Accounts_' + dateToInputValue(new Date()) + '.xlsx');
+}
+const DL_EXPORTS = [
+  {id:'complete', title:'Complete NPA List', desc:'Every account in the current NPA book, one sheet.', fn:'dlExportComplete'},
+  {id:'assetcode', title:'Asset Code wise NPA List', desc:'5 separate sheets -- SUB_STD, DA1, DA2, DA3, LOSS.', fn:'dlExportAssetCodeWise'},
+  {id:'5l', title:'NPA ₹5 Lakh and Above', desc:'Customer’s combined O/S ≥ ₹5L and < ₹10L (all of that customer’s linked accounts included).', fn:'dlExport5LPlus'},
+  {id:'10l', title:'NPA ₹10 Lakh and Above', desc:'Customer’s combined O/S ≥ ₹10L (all of that customer’s linked accounts included).', fn:'dlExport10LPlus'},
+  {id:'sb2000', title:'SB Balance Above ₹2,000', desc:'Accounts whose linked SB account balance exceeds ₹2,000.', fn:'dlExportSbAbove2000'},
+  {id:'curmonth', title:'Current Month — Sub-Standard Accounts', desc:'Cust NPA Date falls in the current calendar month, Asset Code = SUB_STD.', fn:'dlExportCurrentMonthSubStd'},
+  {id:'thisfy', title:'This Financial Year’s NPA Accounts', desc:'Cust NPA Date falls within the current financial year (April–March).', fn:'dlExportThisFY'},
+];
+function renderNpaDownloadView(){
+  const el = document.getElementById('npaDownloadArea');
+  if(!el) return;
+  el.innerHTML = '<div class="dl-grid">' + DL_EXPORTS.map(x=>
+    '<div class="card dl-card">'
+    + '<div class="dl-card-title">' + esc(x.title) + '</div>'
+    + '<div class="dl-card-desc">' + esc(x.desc) + '</div>'
+    + '<button type="button" class="dl-card-btn" onclick="' + x.fn + '()">'
+    +   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'
+    +   ' Download</button>'
+    + '</div>'
+  ).join('') + '</div>';
+}
+
 function downloadDailyTemplate(){
   const headers = ['Sol','Region','Branch','Account No','Customer ID','Intt Rev','Scheme Code','Account Name','Balance Amount','Turnover','Interest Charge Amount','Continuous Excess Date','Review Date','KCC Disbursement Date/Stock Date','Due date','Demand Amount','Adjustment Amount','Reasons','Exempted','Account NPA Date','Cust NPA Date','SBA Acc/Balance','Remarks','Category','Prov Amt','CADU','Sanction Date','Limit','Disb Date','ROI','Mobile No','SMA Status','Sec Val','Sec OS','Unsec OS'];
   const example = ['9316','HATHRAS','MAANT','160720303013711','705760143','','AG203','EXAMPLE BORROWER NAME','38155.85','','','','','','','38155.85','','CBS NPA','','30-11-2012','30-11-2012','124610100004372 -> 0','Marked in CBS','DA3','38155.85','1009','23-11-2010','40000','23-11-2011','9','9999999999','SMA0','80000','38155.85','0'];
@@ -9174,6 +9346,13 @@ function exportSmaSummary(){
   showToast(`✓ ${rows.length} account row${rows.length>1?'s':''} exported`);
 }
 window.exportSmaSummary = exportSmaSummary;
+window.dlExportComplete = dlExportComplete;
+window.dlExportAssetCodeWise = dlExportAssetCodeWise;
+window.dlExport5LPlus = dlExport5LPlus;
+window.dlExport10LPlus = dlExport10LPlus;
+window.dlExportSbAbove2000 = dlExportSbAbove2000;
+window.dlExportCurrentMonthSubStd = dlExportCurrentMonthSubStd;
+window.dlExportThisFY = dlExportThisFY;
 
 /* ---------- Nav / view switching ---------- */
 // OneDrive/PassSheet are reached only via the Utility hub now (2026-09-08),
@@ -9223,6 +9402,7 @@ function switchView(view){
     if(view==='pnpaslip') renderPnpaSlipView();
     if(view==='kccov') renderKccOverdue();
     if(view==='sma') renderSmaDashboard();
+    if(view==='npadownload') renderNpaDownloadView();
     if(view==='otsapplication') renderOtsApplicationView();
     // Resume a still-valid OneDrive sign-in silently (no popup) whenever
     // this tab is opened while it's still showing the Connect screen --
