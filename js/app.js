@@ -5432,15 +5432,16 @@ function dlWriteSheet(ws, rows){
 // rows (matching Branch Split's own if(catRows.length) convention), same
 // buffer->Blob->anchor->toast download sequence this app already uses
 // elsewhere for its own Excel exports.
-async function dlExportWorkbook(sheets, filename){
+async function dlExportWorkbook(sheets, filename, writerFn){
   await ensureExcelJS();
+  const writer = writerFn || dlWriteSheet;
   const wb = new ExcelJS.Workbook();
   let any = false;
   sheets.forEach(s=>{
     if(!s.rows.length) return;
     any = true;
     const ws = wb.addWorksheet(s.name, { views:[{state:'frozen', ySplit:1}] });
-    dlWriteSheet(ws, s.rows);
+    writer(ws, s.rows);
   });
   if(!any){ showToast('No matching accounts found.'); return; }
   const buf = await wb.xlsx.writeBuffer();
@@ -5527,6 +5528,89 @@ function dlExportThisFY(){
   });
   dlExportWorkbook([{name:'This_FY_SubStd', rows}], 'This_FY_SubStd_' + dateToInputValue(new Date()) + '.xlsx');
 }
+
+/* ---------- Download tab: KCC Overdue exports -- a second DL_TAB_GROUPS
+   category, same download mechanics (dlExportWorkbook) as the NPA category
+   above, reading from KCC_OVERDUE_DATA/KC instead of DATA.npa.rows/C.
+   KCC Overdue data carries no SB Balance field at all (confirmed -- that
+   field only exists on the NPA book), so there is deliberately no SB
+   Balance export here. ---------- */
+const KCC_DL_OUT_HEADERS = ['Branch','Account No','Customer ID','Scheme Code','Account Name',
+  'Balance Amount','CADU','Limit','Review Date','Cust NPA Date','F.Y.','Category','SMA','Reason'];
+const KCC_DL_OUT_WIDTHS = [18,16,14,12,30,16,13,12,13,13,10,12,10,22];
+function dlWriteKccSheet(ws, rows){
+  const hRow = ws.getRow(1);
+  KCC_DL_OUT_HEADERS.forEach((h,i)=>{ hRow.getCell(i+1).value = h; });
+  dlStyleHeaderRow(hRow, KCC_DL_OUT_HEADERS.length);
+  rows.forEach((r, ri)=>{
+    const row = ws.getRow(ri+2);
+    row.getCell(1).value = r[KC.BRANCH]; row.getCell(2).value = r[KC.ACCT]; row.getCell(2).numFmt = '0';
+    row.getCell(3).value = r[KC.CUST_ID]; row.getCell(4).value = r[KC.SCHEME]; row.getCell(5).value = r[KC.NAME];
+    row.getCell(6).value = Number(r[KC.OS])||0; row.getCell(6).numFmt = '0.00';
+    row.getCell(7).value = Number(r[KC.CADU])||0; row.getCell(7).numFmt = '0.00';
+    row.getCell(8).value = Number(r[KC.LIMIT])||0; row.getCell(8).numFmt = '0.00';
+    row.getCell(9).value = r[KC.REVIEW]; row.getCell(10).value = r[KC.CUSTNPADATE];
+    row.getCell(11).value = stripQuoteChars(r[KC.FY]); row.getCell(12).value = r[KC.CATEGORY];
+    row.getCell(13).value = r[KC.SMA]; row.getCell(14).value = r[KC.REASON];
+    if(ri % 2 === 1){
+      for(let fc=1; fc<=KCC_DL_OUT_HEADERS.length; fc++){ row.getCell(fc).fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F5F3'}}; }
+    }
+  });
+  ws.columns.forEach((col,i)=>{ col.width = KCC_DL_OUT_WIDTHS[i]; });
+  if(rows.length){ ws.autoFilter = { from:{row:1,column:1}, to:{row:rows.length+1,column:KCC_DL_OUT_HEADERS.length} }; }
+}
+// Lazily fetches data/kcc-overdue.json the same way renderKccOverdue()
+// already does (cross-origin, from the production npadashboard site),
+// reusing whatever's already loaded if the KCC Overdue tab was visited
+// earlier this session.
+function ensureKccOverdueData(){
+  if(KCC_OVERDUE_DATA) return Promise.resolve(KCC_OVERDUE_DATA);
+  return fetchJson(DATA_ORIGIN + 'data/kcc-overdue.json?t=' + Date.now())
+    .then(d => { KCC_OVERDUE_DATA = d; return d; })
+    .catch(e => { showToast('Could not load KCC Overdue data.'); throw e; });
+}
+// Branch-locked to the logged-in Sol ID -- KCC Overdue rows carry only a
+// branch NAME string, so KCCOV_BRANCH_SOL resolves it to a Sol ID, same
+// technique already used throughout this file's own KCC Overdue tab (e.g.
+// the branch filter at js/app.js:5949, lockedKccBranch at :8324).
+function dlKccSourceRows(){
+  const rows = (KCC_OVERDUE_DATA && KCC_OVERDUE_DATA.rows) || [];
+  const solId = loggedInSolId();
+  if(!solId) return rows;
+  return rows.filter(r => String(KCCOV_BRANCH_SOL[String(r[KC.BRANCH]).toUpperCase()]) === String(solId));
+}
+function dlExportKccThisMonth(){
+  ensureKccOverdueData().then(()=>{
+    const today = new Date();
+    const rows = dlKccSourceRows().filter(r=>{
+      const d = toDate(r[KC.CUSTNPADATE]);
+      return d && d.getFullYear()===today.getFullYear() && d.getMonth()===today.getMonth();
+    });
+    dlExportWorkbook([{name:'KCC_Overdue_This_Month', rows}], 'KCC_Overdue_This_Month_' + dateToInputValue(new Date()) + '.xlsx', dlWriteKccSheet);
+  }).catch(()=>{});
+}
+function dlExportKccThisFY(){
+  ensureKccOverdueData().then(()=>{
+    const curFy = dlFyStartYear(new Date());
+    const rows = dlKccSourceRows().filter(r=>{
+      const d = toDate(r[KC.CUSTNPADATE]);
+      return d && dlFyStartYear(d)===curFy;
+    });
+    dlExportWorkbook([{name:'KCC_Overdue_This_FY', rows}], 'KCC_Overdue_This_FY_' + dateToInputValue(new Date()) + '.xlsx', dlWriteKccSheet);
+  }).catch(()=>{});
+}
+function dlExportKccTotal(){
+  ensureKccOverdueData().then(()=>{
+    const rows = dlKccSourceRows();
+    dlExportWorkbook([{name:'KCC_Overdue_Total', rows}], 'KCC_Overdue_Total_' + dateToInputValue(new Date()) + '.xlsx', dlWriteKccSheet);
+  }).catch(()=>{});
+}
+const KCC_DL_EXPORTS = [
+  {id:'kcctotal', title:'Total KCC Overdue', desc:'Every KCC Overdue account, one sheet.', fn:'dlExportKccTotal'},
+  {id:'kccthismonth', title:'Current Month', desc:'Cust NPA Date falls in the current calendar month.', fn:'dlExportKccThisMonth'},
+  {id:'kccthisfy', title:'This Financial Year', desc:'Cust NPA Date falls within the current financial year (April–March).', fn:'dlExportKccThisFY'},
+];
+
 const DL_EXPORTS = [
   {id:'complete', title:'Complete NPA List', desc:'Every account in the current NPA book, one sheet.', fn:'dlExportComplete'},
   {id:'assetcode', title:'Asset Code wise NPA List', desc:'Pick all 5 categories in one workbook, or any single category on its own.', fn:'dlExportAssetCodeWise'},
@@ -5539,7 +5623,10 @@ const DL_EXPORTS = [
 // One category group today ("NPA") -- kept as its own tab structure (not a
 // bare card grid) so a future category (e.g. KCC Overdue/SMA downloads) can
 // be added as a sibling tab later without a redesign.
-const DL_TAB_GROUPS = [ {id:'npa', label:'NPA', exports: DL_EXPORTS} ];
+const DL_TAB_GROUPS = [
+  {id:'npa', label:'NPA', exports: DL_EXPORTS},
+  {id:'kccoverdue', label:'KCC Overdue', exports: KCC_DL_EXPORTS},
+];
 let dlActiveTab = DL_TAB_GROUPS[0].id;
 const DL_DOWNLOAD_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
 function setDlTab(id){ dlActiveTab = id; renderNpaDownloadView(); }
@@ -9430,6 +9517,9 @@ window.dlExport10LPlus = dlExport10LPlus;
 window.dlExportSbAbove2000 = dlExportSbAbove2000;
 window.dlExportCurrentMonthSubStd = dlExportCurrentMonthSubStd;
 window.dlExportThisFY = dlExportThisFY;
+window.dlExportKccThisMonth = dlExportKccThisMonth;
+window.dlExportKccThisFY = dlExportKccThisFY;
+window.dlExportKccTotal = dlExportKccTotal;
 window.setDlTab = setDlTab;
 
 /* ---------- Nav / view switching ---------- */
