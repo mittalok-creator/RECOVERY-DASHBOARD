@@ -2970,7 +2970,19 @@ function toggleAggWf(){
 }
 window.toggleAggWf = toggleAggWf;
 
+// Narrower browser Back/Forward support (Alok's own request) -- scoped to
+// just this one full-screen #detailPane, not the whole app's tab navigation.
+// closeDetail() is still every onclick/Escape handler's own entry point; it
+// now only asks history to go back (if a detail-open entry is actually on
+// the stack) rather than tearing the pane down itself -- the popstate
+// listener below (registered once, near the other top-level listeners) does
+// the real teardown via closeDetailActual(), so a hardware/swipe Back
+// gesture and the in-app back arrow converge on the exact same close path.
 function closeDetail(){
+  if(history.state && history.state.upgbDetailOpen){ history.back(); }
+  else { closeDetailActual(); }
+}
+function closeDetailActual(){
   const pane = document.getElementById('detailPane');
   pane.classList.remove('open');
   pane.innerHTML = '';
@@ -2991,6 +3003,29 @@ function closeDetail(){
      start screen is what's showing; a result list is left as it was. */
   if(document.querySelector('#mainArea .ots-start')) renderEmpty();
 }
+// Pushes one history entry marking the detail pane as open -- called right
+// after the pane's own 'open' class is added, only on a genuinely fresh
+// open (guarded by the caller) so re-rendering the same pane with a
+// different account doesn't pile up extra back-stack entries. `extra`
+// carries just enough to reopen the exact same screen on Forward -- a
+// customer ID for the NPA Particulars page, or a source+account no. for the
+// KCC/PNPA quick-detail page.
+function pushDetailHistoryState(extra){
+  try{ history.pushState(Object.assign({upgbDetailOpen:true}, extra), ''); }catch(e){}
+}
+window.addEventListener('popstate', (event)=>{
+  const pane = document.getElementById('detailPane');
+  const state = event.state;
+  if(state && state.upgbDetailOpen){
+    // Forward (or landing back on a still-open detail entry) -- reopen the
+    // exact screen without pushing a new entry (we're already sitting on
+    // this one).
+    if(state.kind==='npa' && state.custId) showNpaAccountDetail(state.custId, true);
+    else if(state.kind==='quick' && state.source && state.acctNo) showQuickAcctDetailByAcct(state.source, state.acctNo, true);
+    return;
+  }
+  if(pane && pane.classList.contains('open')) closeDetailActual();
+});
 
 function drawDetailBody(custRow, slots, prevOts){
   const body = document.getElementById('detailBody');
@@ -6049,7 +6084,7 @@ function drawNpaDetailBody(custRow, slots, prevOts){
 // (Dashboard's account/customer list rows via showNpaQuickDetail, Cmd+K's
 // npa branch, and any other caller of showQuickAcctDetail('npa', row) --
 // all funnel in here via that function's isNpa branch below).
-function showNpaAccountDetail(custId){
+function showNpaAccountDetail(custId, fromHistory){
   const custRow = byCustId.get(String(custId));
   if(!custRow) return;
   const slots = [1,2,3,4].map(n=>{
@@ -6077,8 +6112,10 @@ function showNpaAccountDetail(custId){
   document.querySelector('.view[data-view="search"]')?.classList.add('active');
 
   const pane = document.getElementById('detailPane');
+  const wasOpen = pane.classList.contains('open');
   document.getElementById('shell').classList.add('detail-active');
   pane.classList.add('open');
+  if(!wasOpen && !fromHistory) pushDetailHistoryState({kind:'npa', custId});
   pane.innerHTML = `
     <div class="detail-head">
       <div class="detail-headrow">
@@ -6189,7 +6226,7 @@ function drawKccPnpaDetailBody(row, source){
   </div>
   `;
 }
-function showKccPnpaAccountDetail(source, row){
+function showKccPnpaAccountDetail(source, row, fromHistory){
   const isKcc = source==='kccov';
   const name = isKcc ? row[KC.NAME] : row[PC.NAME];
   const branch = isKcc ? row[KC.BRANCH] : row[PC.BRANCH];
@@ -6205,8 +6242,10 @@ function showKccPnpaAccountDetail(source, row){
   // closeDetail()'s existing cleanup unchanged, no new state needed.
   document.querySelector('.view[data-view="search"]')?.classList.add('active');
   const pane = document.getElementById('detailPane');
+  const wasOpen = pane.classList.contains('open');
   document.getElementById('shell').classList.add('detail-active');
   pane.classList.add('open');
+  if(!wasOpen && !fromHistory) pushDetailHistoryState({kind:'quick', source, acctNo: String(isKcc ? row[KC.ACCT] : row[PC.ACCT])});
   pane.innerHTML = `
     <div class="detail-head">
       <div class="detail-headrow">
@@ -6240,10 +6279,10 @@ function showKccPnpaAccountDetail(source, row){
    production-adjacent codebase; nothing in this portal's UI calls it.
    computeSlot()/lookupLoanSlot() (pure data functions, no settlement side
    effects) are reused unchanged by showNpaAccountDetail() below. */
-function showQuickAcctDetail(source, row){
+function showQuickAcctDetail(source, row, fromHistory){
   const isNpa = source==='npa';
-  if(isNpa){ showNpaAccountDetail(row[C.CUST_ID]); return; }
-  showKccPnpaAccountDetail(source, row);
+  if(isNpa){ showNpaAccountDetail(row[C.CUST_ID], fromHistory); return; }
+  showKccPnpaAccountDetail(source, row, fromHistory);
 }
 window.showQuickAcctDetail = showQuickAcctDetail;
 /* Tapping a row inside the NPA/PNPA/KCC Overdue account-list modal opens
@@ -6251,26 +6290,26 @@ window.showQuickAcctDetail = showQuickAcctDetail;
    account no. against the raw dataset rather than threading the raw row
    through the list-modal's already-transformed {acctNo,name,os,...}
    display objects, since account numbers are unique within each report. */
-function showQuickAcctDetailByAcct(source, acctNo){
+function showQuickAcctDetailByAcct(source, acctNo, fromHistory){
   if(source==='npa'){
     const row = npaByAcct.get(String(acctNo)); // reuses the existing "Build indexes once" Map
-    if(row) showQuickAcctDetail('npa', row);
+    if(row) showQuickAcctDetail('npa', row, fromHistory);
     return;
   }
   const data = source==='kccov' ? KCC_OVERDUE_DATA : PNPA_DATA;
   if(!data || !data.rows) return;
   const col = source==='kccov' ? KC.ACCT : PC.ACCT;
   const row = data.rows.find(r=>String(r[col])===String(acctNo));
-  if(row) showQuickAcctDetail(source, row);
+  if(row) showQuickAcctDetail(source, row, fromHistory);
 }
 window.showQuickAcctDetailByAcct = showQuickAcctDetailByAcct;
 /* Repoints every former openDetail(custId) call site (Dashboard's
    account/customer list-modal rows, Cmd+K's npa branch) at the read-only
    card instead. Reuses the same byCustId Map (js/app.js, "Build indexes
    once") openDetail() itself already looks up by -- no new indexing. */
-function showNpaQuickDetail(custId){
+function showNpaQuickDetail(custId, fromHistory){
   const row = byCustId.get(String(custId));
-  if(row) showQuickAcctDetail('npa', row);
+  if(row) showQuickAcctDetail('npa', row, fromHistory);
 }
 window.showNpaQuickDetail = showNpaQuickDetail;
 function cmdkEnsureVisible(){ const el=cmdkResults.querySelector('.cmdk-item.active'); if(el) el.scrollIntoView({block:'nearest'}); }
