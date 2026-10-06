@@ -931,13 +931,13 @@ function otsAppAnimateCountUp(el, target, fmtFn){
 // its own -- otsAppSettlementFieldsCardHtml() below still wraps this in
 // the original single-account/manual-mode card, unsuffixed (idx 0),
 // button included, byte-for-byte the same output as before this split.
-function otsAppFieldsGridHtml(idx, hintHtml){
+function otsAppFieldsGridHtml(idx, hintHtml, prefillAmt){
   idx = idx || 0;
   return '<div class="ots-app-fields-grid">'
     +   '<div class="ots-app-field">'
     +     '<label class="ots-app-field-label">Outstanding as on Date of OTS <span class="req">*</span></label>'
     +     '<div class="ots-app-field-input-wrap"><span class="ots-app-field-icon">₹</span>'
-    +       '<input type="text" inputmode="decimal" id="' + otsAppFieldId('otsAppOutstanding', idx) + '" class="dash-select ots-app-field-input" placeholder="e.g. 245000"></div>'
+    +       '<input type="text" inputmode="decimal" id="' + otsAppFieldId('otsAppOutstanding', idx) + '" class="dash-select ots-app-field-input" placeholder="e.g. 245000" value="' + (prefillAmt ? prefillAmt.toFixed(2) : '') + '"></div>'
     +     (hintHtml ? ('<div class="ots-app-field-hint">' + hintHtml + '</div>') : '')
     +   '</div>'
     +   '<div class="ots-app-field">'
@@ -961,10 +961,10 @@ function otsAppFieldsGridHtml(idx, hintHtml){
     +   '</div>'
     + '</div>';
 }
-function otsAppSettlementFieldsCardHtml(hintHtml){
+function otsAppSettlementFieldsCardHtml(hintHtml, prefillAmt){
   return '<div class="card ots-app-fields-card">'
     + '<div style="font-weight:800;margin-bottom:12px;">Please enter these details</div>'
-    + otsAppFieldsGridHtml(0, hintHtml)
+    + otsAppFieldsGridHtml(0, hintHtml, prefillAmt)
     + '<div style="margin-top:18px;">'
     +   '<button type="button" class="ots-app-btn-primary" id="otsAppGenerateBtn" onclick="otsAppGenerate()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Generate Application Form</button>'
     + '</div>'
@@ -1033,7 +1033,7 @@ function renderOtsApplicationDetail(){
       +   '<div class="ots-app-stat highlight"><span class="lbl">Outstanding (as per records)</span><span class="v" id="otsAppOutstandingStat">₹0.00</span></div>'
       + '</div>'
       + '</div>'
-      + otsAppSettlementFieldsCardHtml('Records show ' + fmtINR2(outstandingAmt) + ' — enter the actual figure as on the settlement date.')
+      + otsAppSettlementFieldsCardHtml('Pre-filled from records (' + fmtINR2(outstandingAmt) + ') — adjust if the actual settlement-date figure differs.', outstandingAmt)
       + '<div id="otsAppPreviewWrap"></div>';
     otsAppAnimateCountUp(document.getElementById('otsAppLoanAmtStat'), loanAmt, fmtINR2);
     otsAppAnimateCountUp(document.getElementById('otsAppOutstandingStat'), outstandingAmt, fmtINR2);
@@ -1073,7 +1073,7 @@ function renderOtsApplicationDetail(){
       +   '<div class="ots-app-stat"><span class="lbl">Loan Amount</span><span class="v" id="' + otsAppFieldId('otsAppLoanAmtStat', idx) + '">₹0.00</span><span class="sub">since ' + fmtDate(acctOpenDate) + '</span></div>'
       +   '<div class="ots-app-stat highlight"><span class="lbl">Outstanding (as per records)</span><span class="v" id="' + otsAppFieldId('otsAppOutstandingStat', idx) + '">₹0.00</span></div>'
       + '</div>'
-      + otsAppFieldsGridHtml(idx, 'Records show ' + fmtINR2(outstandingAmt) + ' — enter the actual figure as on the settlement date.')
+      + otsAppFieldsGridHtml(idx, 'Pre-filled from records (' + fmtINR2(outstandingAmt) + ') — adjust if the actual settlement-date figure differs.', outstandingAmt)
       + '</div>';
   });
 
