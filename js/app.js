@@ -5446,8 +5446,17 @@ function dlSourceRows(){
 function dlExportComplete(){
   dlExportWorkbook([{name:'NPA_LIST', rows: dlSourceRows()}], 'NPA_Complete_List_' + dateToInputValue(new Date()) + '.xlsx');
 }
-function dlExportAssetCodeWise(){
+// assetCode: omitted/'all' -> all 5 category sheets in one workbook (today's
+// default); a specific DL_CATEGORIES value -> just that one category, as its
+// own single-sheet workbook (Alok's own request: "ya to pachon ya fir koi
+// bhi single single" -- either all five, or any one single category).
+function dlExportAssetCodeWise(assetCode){
   const rows = dlSourceRows();
+  if(assetCode && assetCode!=='all'){
+    dlExportWorkbook([{name:assetCode, rows: rows.filter(r=>r[C.ASSET]===assetCode)}],
+      'NPA_Asset_Code_' + assetCode + '_' + dateToInputValue(new Date()) + '.xlsx');
+    return;
+  }
   const sheets = DL_CATEGORIES.map(cat=>({ name: cat, rows: rows.filter(r=>r[C.ASSET]===cat) }));
   dlExportWorkbook(sheets, 'NPA_Asset_Code_Wise_' + dateToInputValue(new Date()) + '.xlsx');
 }
@@ -5472,35 +5481,64 @@ function dlExportCurrentMonthSubStd(){
   });
   dlExportWorkbook([{name:'CurrentMonth_SubStd', rows}], 'Current_Month_SubStd_' + dateToInputValue(new Date()) + '.xlsx');
 }
+// Alok's own request: this export too should be Sub-Standard-only, matching
+// the Current Month export's own Asset Code = SUB_STD scoping.
 function dlExportThisFY(){
   const curFy = dlFyStartYear(new Date());
   const rows = dlSourceRows().filter(r=>{
+    if(r[C.ASSET]!=='SUB_STD') return false;
     const d = toDate(r[C.NPA_DT]);
     return d && dlFyStartYear(d)===curFy;
   });
-  dlExportWorkbook([{name:'This_FY_Accounts', rows}], 'This_FY_Accounts_' + dateToInputValue(new Date()) + '.xlsx');
+  dlExportWorkbook([{name:'This_FY_SubStd', rows}], 'This_FY_SubStd_' + dateToInputValue(new Date()) + '.xlsx');
 }
 const DL_EXPORTS = [
   {id:'complete', title:'Complete NPA List', desc:'Every account in the current NPA book, one sheet.', fn:'dlExportComplete'},
-  {id:'assetcode', title:'Asset Code wise NPA List', desc:'5 separate sheets -- SUB_STD, DA1, DA2, DA3, LOSS.', fn:'dlExportAssetCodeWise'},
+  {id:'assetcode', title:'Asset Code wise NPA List', desc:'Pick all 5 categories in one workbook, or any single category on its own.', fn:'dlExportAssetCodeWise'},
   {id:'5l', title:'NPA ₹5 Lakh and Above', desc:'Customer’s combined O/S ≥ ₹5L and < ₹10L (all of that customer’s linked accounts included).', fn:'dlExport5LPlus'},
   {id:'10l', title:'NPA ₹10 Lakh and Above', desc:'Customer’s combined O/S ≥ ₹10L (all of that customer’s linked accounts included).', fn:'dlExport10LPlus'},
   {id:'sb2000', title:'SB Balance Above ₹2,000', desc:'Accounts whose linked SB account balance exceeds ₹2,000.', fn:'dlExportSbAbove2000'},
   {id:'curmonth', title:'Current Month — Sub-Standard Accounts', desc:'Cust NPA Date falls in the current calendar month, Asset Code = SUB_STD.', fn:'dlExportCurrentMonthSubStd'},
-  {id:'thisfy', title:'This Financial Year’s NPA Accounts', desc:'Cust NPA Date falls within the current financial year (April–March).', fn:'dlExportThisFY'},
+  {id:'thisfy', title:'This Financial Year — Sub-Standard Accounts', desc:'Cust NPA Date falls within the current financial year (April–March), Asset Code = SUB_STD.', fn:'dlExportThisFY'},
 ];
-function renderNpaDownloadView(){
-  const el = document.getElementById('npaDownloadArea');
-  if(!el) return;
-  el.innerHTML = '<div class="dl-grid">' + DL_EXPORTS.map(x=>
-    '<div class="card dl-card">'
+// One category group today ("NPA") -- kept as its own tab structure (not a
+// bare card grid) so a future category (e.g. KCC Overdue/SMA downloads) can
+// be added as a sibling tab later without a redesign.
+const DL_TAB_GROUPS = [ {id:'npa', label:'NPA', exports: DL_EXPORTS} ];
+let dlActiveTab = DL_TAB_GROUPS[0].id;
+const DL_DOWNLOAD_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+function setDlTab(id){ dlActiveTab = id; renderNpaDownloadView(); }
+function dlExportCardHtml(x){
+  if(x.id==='assetcode'){
+    return '<div class="card dl-card">'
+      + '<div class="dl-card-title">' + esc(x.title) + '</div>'
+      + '<div class="dl-card-desc">' + esc(x.desc) + '</div>'
+      + '<div class="dl-card-row">'
+      +   '<select id="dlAssetCodeSelect" class="dash-select dl-card-select">'
+      +     '<option value="all">All 5 sheets</option>'
+      +     DL_CATEGORIES.map(c=>'<option value="' + esc(c) + '">' + esc(c) + ' only</option>').join('')
+      +   '</select>'
+      +   '<button type="button" class="dl-card-btn" onclick="dlExportAssetCodeWise(document.getElementById(\'dlAssetCodeSelect\').value)">'
+      +     DL_DOWNLOAD_ICON + ' Download</button>'
+      + '</div>'
+      + '</div>';
+  }
+  return '<div class="card dl-card">'
     + '<div class="dl-card-title">' + esc(x.title) + '</div>'
     + '<div class="dl-card-desc">' + esc(x.desc) + '</div>'
     + '<button type="button" class="dl-card-btn" onclick="' + x.fn + '()">'
-    +   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'
-    +   ' Download</button>'
+    +   DL_DOWNLOAD_ICON + ' Download</button>'
+    + '</div>';
+}
+function renderNpaDownloadView(){
+  const el = document.getElementById('npaDownloadArea');
+  if(!el) return;
+  const activeGroup = DL_TAB_GROUPS.find(g=>g.id===dlActiveTab) || DL_TAB_GROUPS[0];
+  el.innerHTML =
+    '<div class="kccov-view-tabs">'
+    + DL_TAB_GROUPS.map(g=>'<button type="button" class="kccov-view-tab' + (g.id===activeGroup.id ? ' active' : '') + '" onclick="setDlTab(\'' + g.id + '\')">' + esc(g.label) + '</button>').join('')
     + '</div>'
-  ).join('') + '</div>';
+    + '<div class="dl-grid" style="margin-top:16px">' + activeGroup.exports.map(dlExportCardHtml).join('') + '</div>';
 }
 
 function downloadDailyTemplate(){
@@ -9353,6 +9391,7 @@ window.dlExport10LPlus = dlExport10LPlus;
 window.dlExportSbAbove2000 = dlExportSbAbove2000;
 window.dlExportCurrentMonthSubStd = dlExportCurrentMonthSubStd;
 window.dlExportThisFY = dlExportThisFY;
+window.setDlTab = setDlTab;
 
 /* ---------- Nav / view switching ---------- */
 // OneDrive/PassSheet are reached only via the Utility hub now (2026-09-08),
