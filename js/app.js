@@ -1558,6 +1558,20 @@ function toggleSacrificePanel(force){ toggleEdgePanel('sacrifice', force); }
 window.toggleSacrificePanel = toggleSacrificePanel;
 function toggleLedgerAccountsPanel(force){ toggleEdgePanel('ledgerAccounts', force); }
 window.toggleLedgerAccountsPanel = toggleLedgerAccountsPanel;
+// Mobile-only launcher for the 4 panels above (see .edge-quickref-fab's own
+// comment in styles.css) -- same toggle-with-force shape as toggleEdgePanel,
+// just opening/closing one small popover menu instead of a full-height panel.
+function toggleEdgeQuickRefMenu(force){
+  const menu = document.getElementById('edgeQuickRefMenu');
+  const backdrop = document.getElementById('edgeQuickRefBackdrop');
+  const fab = document.getElementById('edgeQuickRefFab');
+  if(!menu) return;
+  const open = force===undefined ? !menu.classList.contains('open') : force;
+  menu.classList.toggle('open', open);
+  backdrop.classList.toggle('open', open);
+  fab.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+window.toggleEdgeQuickRefMenu = toggleEdgeQuickRefMenu;
 async function onedriveTryResume(){
   try{
     const app = await onedriveMsal();
@@ -2022,7 +2036,7 @@ initLedgerAcctNumbers();
   if(solId) onLedgerSolIdInput(solId);
 })();
 document.addEventListener('keydown', (e)=>{
-  if(e.key==='Escape'){ EDGE_PANEL_KEYS.forEach(k=>toggleEdgePanel(k, false)); }
+  if(e.key==='Escape'){ EDGE_PANEL_KEYS.forEach(k=>toggleEdgePanel(k, false)); toggleEdgeQuickRefMenu(false); }
 });
 
 updateReportDateDisplay();
@@ -5529,6 +5543,22 @@ function dlExportThisFY(){
   dlExportWorkbook([{name:'This_FY_SubStd', rows}], 'This_FY_SubStd_' + dateToInputValue(new Date()) + '.xlsx');
 }
 
+/* Small icon set for the Download tab's category badges. Declared here
+   rather than reusing the later ICON_* block (near heroKpiCard) because
+   DL_EXPORTS/KCC_DL_EXPORTS below are const array literals evaluated
+   immediately as initApp() runs top to bottom -- referencing a const
+   declared further down the file would throw (temporal dead zone),
+   unlike calling the already-hoisted svgIcon() function itself, which is
+   safe to call from any line. */
+const DL_ICON_LIST = '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>';
+const DL_ICON_LAYERS = '<path d="m12.83 2.18 8.4 3.9a1 1 0 0 1 0 1.83l-8.4 3.9a2 2 0 0 1-1.66 0L2.77 7.91a1 1 0 0 1 0-1.83l8.4-3.9a2 2 0 0 1 1.66 0Z"/><path d="m22 17.65-9.17 4.26a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.26a2 2 0 0 1-1.66 0L2 12.65"/>';
+const DL_ICON_RUPEE = '<path d="M6 3h12M6 8h12m-9 5 8.5 8M6 13h3c6.667 0 6.667-10 0-10"/>';
+const DL_ICON_LANDMARK2 = '<path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M4 10v11"/><path d="M20 10v11"/><path d="M8 14v3"/><path d="M12 14v3"/><path d="M16 14v3"/>';
+const DL_ICON_WALLET = '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>';
+const DL_ICON_CAL_DAY = '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><circle cx="12" cy="15" r="1.6" fill="currentColor" stroke="none"/>';
+const DL_ICON_CAL_RANGE = '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 15h8"/>';
+const DL_ICON_CLOCK = '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>';
+
 /* ---------- Download tab: KCC Overdue exports -- a second DL_TAB_GROUPS
    category, same download mechanics (dlExportWorkbook) as the NPA category
    above, reading from KCC_OVERDUE_DATA/KC instead of DATA.npa.rows/C.
@@ -5607,19 +5637,19 @@ function dlExportKccTotal(){
   }).catch(()=>{});
 }
 const KCC_DL_EXPORTS = [
-  {id:'kcctotal', title:'Total KCC Overdue', desc:'Every KCC Overdue account, one sheet.', fn:'dlExportKccTotal'},
-  {id:'kccthismonth', title:'Current Month', desc:'Cust NPA Date falls in the current calendar month.', fn:'dlExportKccThisMonth'},
-  {id:'kccthisfy', title:'This Financial Year', desc:'Cust NPA Date falls within the current financial year (April–March).', fn:'dlExportKccThisFY'},
+  {id:'kcctotal', title:'Total KCC Overdue', desc:'Every KCC Overdue account, one sheet.', fn:'dlExportKccTotal', icon:DL_ICON_WALLET, color:'indigo'},
+  {id:'kccthismonth', title:'Current Month', desc:'Cust NPA Date falls in the current calendar month.', fn:'dlExportKccThisMonth', icon:DL_ICON_CAL_DAY, color:'gold'},
+  {id:'kccthisfy', title:'This Financial Year', desc:'Cust NPA Date falls within the current financial year (April–March).', fn:'dlExportKccThisFY', icon:DL_ICON_CAL_RANGE, color:'teal'},
 ];
 
 const DL_EXPORTS = [
-  {id:'complete', title:'Complete NPA List', desc:'Every account in the current NPA book, one sheet.', fn:'dlExportComplete'},
-  {id:'assetcode', title:'Asset Code wise NPA List', desc:'Pick all 5 categories in one workbook, or any single category on its own.', fn:'dlExportAssetCodeWise'},
-  {id:'5l', title:'NPA ₹5 Lakh and Above', desc:'Customer’s combined O/S ≥ ₹5L and < ₹10L (all of that customer’s linked accounts included).', fn:'dlExport5LPlus'},
-  {id:'10l', title:'NPA ₹10 Lakh and Above', desc:'Customer’s combined O/S ≥ ₹10L (all of that customer’s linked accounts included).', fn:'dlExport10LPlus'},
-  {id:'sb2000', title:'SB Balance Above ₹2,000', desc:'Accounts whose linked SB account balance exceeds ₹2,000.', fn:'dlExportSbAbove2000'},
-  {id:'curmonth', title:'Current Month — Sub-Standard Accounts', desc:'Cust NPA Date falls in the current calendar month, Asset Code = SUB_STD.', fn:'dlExportCurrentMonthSubStd'},
-  {id:'thisfy', title:'This Financial Year — Sub-Standard Accounts', desc:'Cust NPA Date falls within the current financial year (April–March), Asset Code = SUB_STD.', fn:'dlExportThisFY'},
+  {id:'complete', title:'Complete NPA List', desc:'Every account in the current NPA book, one sheet.', fn:'dlExportComplete', icon:DL_ICON_LIST, color:'jade'},
+  {id:'assetcode', title:'Asset Code wise NPA List', desc:'Pick all 5 categories in one workbook, or any single category on its own.', fn:'dlExportAssetCodeWise', icon:DL_ICON_LAYERS, color:'gold'},
+  {id:'5l', title:'NPA ₹5 Lakh and Above', desc:'Customer’s combined O/S ≥ ₹5L and < ₹10L (all of that customer’s linked accounts included).', fn:'dlExport5LPlus', icon:DL_ICON_RUPEE, color:'coral'},
+  {id:'10l', title:'NPA ₹10 Lakh and Above', desc:'Customer’s combined O/S ≥ ₹10L (all of that customer’s linked accounts included).', fn:'dlExport10LPlus', icon:DL_ICON_LANDMARK2, color:'rose'},
+  {id:'sb2000', title:'SB Balance Above ₹2,000', desc:'Accounts whose linked SB account balance exceeds ₹2,000.', fn:'dlExportSbAbove2000', icon:DL_ICON_WALLET, color:'teal'},
+  {id:'curmonth', title:'Current Month — Sub-Standard Accounts', desc:'Cust NPA Date falls in the current calendar month, Asset Code = SUB_STD.', fn:'dlExportCurrentMonthSubStd', icon:DL_ICON_CAL_DAY, color:'indigo'},
+  {id:'thisfy', title:'This Financial Year — Sub-Standard Accounts', desc:'Cust NPA Date falls within the current financial year (April–March), Asset Code = SUB_STD.', fn:'dlExportThisFY', icon:DL_ICON_CAL_RANGE, color:'violet'},
 ];
 // One category group today ("NPA") -- kept as its own tab structure (not a
 // bare card grid) so a future category (e.g. KCC Overdue/SMA downloads) can
@@ -5628,13 +5658,17 @@ const DL_TAB_GROUPS = [
   {id:'npa', label:'NPA', exports: DL_EXPORTS},
   {id:'kccoverdue', label:'KCC Overdue', exports: KCC_DL_EXPORTS},
 ];
+// Icons for the tab row itself (separate from each card's own icon above),
+// keyed by DL_TAB_GROUPS id.
+const DL_TAB_ICONS = { npa: DL_ICON_LIST, kccoverdue: DL_ICON_CLOCK };
 let dlActiveTab = DL_TAB_GROUPS[0].id;
 const DL_DOWNLOAD_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
 function setDlTab(id){ dlActiveTab = id; renderNpaDownloadView(); }
 function dlExportCardHtml(x){
+  const head = '<div class="dl-card-head"><div class="dl-card-icon">' + svgIcon(x.icon) + '</div><div class="dl-card-title">' + esc(x.title) + '</div></div>';
   if(x.id==='assetcode'){
-    return '<div class="card dl-card">'
-      + '<div class="dl-card-title">' + esc(x.title) + '</div>'
+    return '<div class="card dl-card tool-' + x.color + '">'
+      + head
       + '<div class="dl-card-desc">' + esc(x.desc) + '</div>'
       + '<div class="dl-card-row">'
       +   '<select id="dlAssetCodeSelect" class="dash-select dl-card-select">'
@@ -5646,8 +5680,8 @@ function dlExportCardHtml(x){
       + '</div>'
       + '</div>';
   }
-  return '<div class="card dl-card">'
-    + '<div class="dl-card-title">' + esc(x.title) + '</div>'
+  return '<div class="card dl-card tool-' + x.color + '">'
+    + head
     + '<div class="dl-card-desc">' + esc(x.desc) + '</div>'
     + '<button type="button" class="dl-card-btn" onclick="' + x.fn + '()">'
     +   DL_DOWNLOAD_ICON + ' Download</button>'
@@ -5659,7 +5693,7 @@ function renderNpaDownloadView(){
   const activeGroup = DL_TAB_GROUPS.find(g=>g.id===dlActiveTab) || DL_TAB_GROUPS[0];
   el.innerHTML =
     '<div class="kccov-view-tabs">'
-    + DL_TAB_GROUPS.map(g=>'<button type="button" class="kccov-view-tab' + (g.id===activeGroup.id ? ' active' : '') + '" onclick="setDlTab(\'' + g.id + '\')">' + esc(g.label) + '</button>').join('')
+    + DL_TAB_GROUPS.map(g=>'<button type="button" class="kccov-view-tab' + (g.id===activeGroup.id ? ' active' : '') + '" onclick="setDlTab(\'' + g.id + '\')">' + svgIcon(DL_TAB_ICONS[g.id]||'') + esc(g.label) + '</button>').join('')
     + '</div>'
     + '<div class="dl-grid" style="margin-top:16px">' + activeGroup.exports.map(dlExportCardHtml).join('') + '</div>';
 }

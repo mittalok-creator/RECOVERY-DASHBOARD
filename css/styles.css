@@ -3271,6 +3271,41 @@ table.bifurcation-table{border-collapse:collapse;width:100%;font-size:12px;backg
    handle whose position happens to overlap the open panel would render
    half-swallowed instead of cleanly on top of it. */
 .edge-handle.edge-handle-hidden{opacity:0;pointer-events:none;transition:opacity .16s var(--ease)}
+
+/* Mobile collapse of the 4-handle rail above (Alok's report, 2026-10-07:
+   .edge-handle-rail had no breakpoint at all, unlike its sibling .side-rail
+   -- css/styles.css:1224's own display:none!important at 1499px -- so it
+   floated over page content at phone width with nowhere to go, visibly
+   covering the Download tab's own cards). .edge-quickref-fab/-menu stay
+   display:none by default (desktop/tablet never see them); the media query
+   below hides the rail and reveals this single button + its popover, at
+   the same <=899px cutoff #bottomTabs itself uses for the real desktop/
+   mobile swap. Menu/backdrop use the same always-in-DOM, opacity+pointer-
+   events-toggled-by-.open pattern .edge-backdrop/.edge-panel already use
+   above, not display:none/block -- that's what makes the transition
+   animate instead of popping. */
+.edge-quickref-fab{display:none;position:fixed;z-index:91;width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;
+  background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 10px 24px var(--accent-soft);
+  align-items:center;justify-content:center;transition:transform .15s var(--ease)}
+.edge-quickref-fab:hover{transform:scale(1.05)}
+.edge-quickref-backdrop{display:none;position:fixed;inset:0;z-index:92;background:rgba(0,0,0,.28);opacity:0;pointer-events:none;transition:opacity .18s var(--ease)}
+.edge-quickref-backdrop.open{opacity:1;pointer-events:auto}
+.edge-quickref-menu{display:none;position:fixed;z-index:93;width:230px;border-radius:16px;padding:8px;
+  background:var(--card);border:1px solid var(--line);box-shadow:0 18px 40px rgba(0,0,0,.28);
+  flex-direction:column;gap:2px;opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .16s var(--ease),transform .16s var(--ease)}
+.edge-quickref-menu.open{opacity:1;transform:translateY(0);pointer-events:auto}
+.edge-quickref-label{font-size:10px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--sub);padding:6px 10px 4px}
+.edge-quickref-row{display:flex;align-items:center;gap:10px;width:100%;padding:10px;border:none;background:none;border-radius:10px;text-align:left;cursor:pointer;font-family:inherit;color:var(--ink);transition:background .12s var(--ease)}
+.edge-quickref-row:hover{background:var(--accent-soft)}
+.edge-quickref-row svg{color:var(--accent);flex-shrink:0}
+.edge-quickref-row span{font-size:13.5px;font-weight:700}
+@media (max-width:899px){
+  .edge-handle-rail{display:none!important}
+  .edge-quickref-fab{display:flex;right:16px;bottom:calc(76px + env(safe-area-inset-bottom))}
+  .edge-quickref-backdrop{display:block}
+  .edge-quickref-menu{display:flex;right:16px;bottom:calc(140px + env(safe-area-inset-bottom))}
+}
+
 .lokadalat-rate-table{width:100%;border-collapse:collapse;font-size:13px;margin:2px 0 14px}
 .lokadalat-rate-table th,.lokadalat-rate-table td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--line)}
 .lokadalat-rate-table th{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--sub)}
@@ -3625,8 +3660,27 @@ table.bifurcation-table{border-collapse:collapse;width:100%;font-size:12px;backg
 
 /* ---------- Download tab: NPA-book Excel export cards ---------- */
 .dl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
-.dl-card{display:flex;flex-direction:column;gap:8px;padding:16px}
-.dl-card-title{font-weight:800;font-size:14px}
+.dl-card{display:flex;flex-direction:column;gap:11px;padding:18px}
+/* Per-category colored icon badge, reusing the exact same --tool-color/
+   --tool-soft custom-property mechanism the Utility Hub's own card icons
+   already use (.utility-card.tool-* / .utility-card-icon, css above) --
+   same radial-gradient-circle treatment, just a smaller 40px badge sized
+   for this card's own tighter layout, so the Download tab's cards read as
+   part of the same design language instead of a one-off new style. */
+.dl-card.tool-jade{--tool-color:var(--tool-jade);--tool-soft:var(--tool-jade-soft)}
+.dl-card.tool-gold{--tool-color:var(--tool-gold);--tool-soft:var(--tool-gold-soft)}
+.dl-card.tool-coral{--tool-color:var(--tool-coral);--tool-soft:var(--tool-coral-soft)}
+.dl-card.tool-rose{--tool-color:var(--tool-rose);--tool-soft:var(--tool-rose-soft)}
+.dl-card.tool-teal{--tool-color:var(--tool-teal);--tool-soft:var(--tool-teal-soft)}
+.dl-card.tool-indigo{--tool-color:var(--tool-indigo);--tool-soft:var(--tool-indigo-soft)}
+.dl-card.tool-violet{--tool-color:var(--tool-violet);--tool-soft:var(--tool-violet-soft)}
+.dl-card-head{display:flex;align-items:center;gap:12px}
+.dl-card-icon{display:flex;align-items:center;justify-content:center;width:40px;height:40px;flex-shrink:0;
+  border-radius:50%;color:#fff;
+  background:radial-gradient(circle at 32% 28%, color-mix(in srgb, var(--tool-color, var(--accent-2)) 55%, white), var(--tool-color, var(--accent-2)) 78%);
+  box-shadow:inset 0 1px 1px rgba(255,255,255,.4), inset 0 -3px 6px rgba(0,0,0,.22), 0 4px 10px var(--tool-soft, var(--accent-2-soft))}
+.dl-card-icon svg{width:18px;height:18px}
+.dl-card-title{font-weight:800;font-size:14.5px}
 .dl-card-desc{font-size:12px;color:var(--sub);line-height:1.5;flex:1}
 .dl-card-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;align-self:flex-start;height:34px;padding:0 16px;border-radius:9px;border:none;background:linear-gradient(160deg,var(--accent),var(--accent-2));color:#fff;font:inherit;font-weight:700;font-size:12.5px;cursor:pointer;box-shadow:0 6px 16px var(--accent-soft);transition:filter .15s var(--ease)}
 .dl-card-btn:hover{filter:brightness(1.08)}
@@ -3636,3 +3690,7 @@ table.bifurcation-table{border-collapse:collapse;width:100%;font-size:12px;backg
 .dl-card-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .dl-card-select{min-width:0;flex:1 1 120px;padding:8px 10px;font-size:12px}
 .dl-card-row .dl-card-btn{align-self:center;flex-shrink:0}
+/* Small icon prepended to each Download-tab tab label (NPA/KCC Overdue) --
+   .kccov-view-tab itself stays untouched so KCC Overdue's own 5-way view
+   switcher (which reuses this same class, no icons) is unaffected. */
+.kccov-view-tab svg{width:13px;height:13px;vertical-align:-2px;margin-right:5px;flex-shrink:0}
