@@ -5536,8 +5536,8 @@ function dlExportThisFY(){
    field only exists on the NPA book), so there is deliberately no SB
    Balance export here. ---------- */
 const KCC_DL_OUT_HEADERS = ['Branch','Account No','Customer ID','Scheme Code','Account Name',
-  'Balance Amount','CADU','Limit','Review Date','Cust NPA Date','F.Y.','Category','SMA','Reason'];
-const KCC_DL_OUT_WIDTHS = [18,16,14,12,30,16,13,12,13,13,10,12,10,22];
+  'ADDRESS','Balance Amount','CADU','Limit','Review Date','Cust NPA Date','F.Y.','Category','SMA','Reason'];
+const KCC_DL_OUT_WIDTHS = [18,16,14,12,30,40,16,13,12,13,13,10,12,10,22];
 function dlWriteKccSheet(ws, rows){
   const hRow = ws.getRow(1);
   KCC_DL_OUT_HEADERS.forEach((h,i)=>{ hRow.getCell(i+1).value = h; });
@@ -5546,12 +5546,13 @@ function dlWriteKccSheet(ws, rows){
     const row = ws.getRow(ri+2);
     row.getCell(1).value = r[KC.BRANCH]; row.getCell(2).value = r[KC.ACCT]; row.getCell(2).numFmt = '0';
     row.getCell(3).value = r[KC.CUST_ID]; row.getCell(4).value = r[KC.SCHEME]; row.getCell(5).value = r[KC.NAME];
-    row.getCell(6).value = Number(r[KC.OS])||0; row.getCell(6).numFmt = '0.00';
-    row.getCell(7).value = Number(r[KC.CADU])||0; row.getCell(7).numFmt = '0.00';
-    row.getCell(8).value = Number(r[KC.LIMIT])||0; row.getCell(8).numFmt = '0.00';
-    row.getCell(9).value = r[KC.REVIEW]; row.getCell(10).value = r[KC.CUSTNPADATE];
-    row.getCell(11).value = stripQuoteChars(r[KC.FY]); row.getCell(12).value = r[KC.CATEGORY];
-    row.getCell(13).value = r[KC.SMA]; row.getCell(14).value = r[KC.REASON];
+    row.getCell(6).value = kccovAddressFor(r[KC.ACCT], r[KC.CUST_ID]);
+    row.getCell(7).value = Number(r[KC.OS])||0; row.getCell(7).numFmt = '0.00';
+    row.getCell(8).value = Number(r[KC.CADU])||0; row.getCell(8).numFmt = '0.00';
+    row.getCell(9).value = Number(r[KC.LIMIT])||0; row.getCell(9).numFmt = '0.00';
+    row.getCell(10).value = r[KC.REVIEW]; row.getCell(11).value = r[KC.CUSTNPADATE];
+    row.getCell(12).value = stripQuoteChars(r[KC.FY]); row.getCell(13).value = r[KC.CATEGORY];
+    row.getCell(14).value = r[KC.SMA]; row.getCell(15).value = r[KC.REASON];
     if(ri % 2 === 1){
       for(let fc=1; fc<=KCC_DL_OUT_HEADERS.length; fc++){ row.getCell(fc).fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F5F3'}}; }
     }
