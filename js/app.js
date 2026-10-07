@@ -5642,6 +5642,70 @@ const KCC_DL_EXPORTS = [
   {id:'kccthisfy', title:'This Financial Year', desc:'Cust NPA Date falls within the current financial year (April–March).', fn:'dlExportKccThisFY', icon:DL_ICON_CAL_RANGE, color:'teal'},
 ];
 
+/* ---------- Download tab: PNPA exports -- a third DL_TAB_GROUPS category
+   (Alok, 2026-10-07: "isko bhi excel main download ka option de do"),
+   mirroring NPA-DASHBOARD's own new PNPA Download category. Reads from
+   PNPA_DATA/PNPA_WEEKLY_DATA/PNPA_MONTHLY_DATA/PC/pnpaLoggedInBranchName/
+   pnpaSlipBucketOf/pnpaAddressFor/ensurePnpa*DataLoaded -- all already
+   built for this app's own PNPA Slippage tab, declared later in the file,
+   which is safe since these are only referenced inside function bodies
+   called well after the whole script has run once. ---------- */
+const PNPA_DL_OUT_HEADERS = ['Region','Branch','Scheme Code','Account No','Account Name',
+  'ADDRESS','Balance Amount','CADU','Limit','Review Date','Reasons','Cust NPA Date','Customer ID'];
+const PNPA_DL_OUT_WIDTHS = [12,18,12,16,30,40,16,13,12,13,22,13,14];
+function dlWritePnpaSheet(ws, rows){
+  const hRow = ws.getRow(1);
+  PNPA_DL_OUT_HEADERS.forEach((h,i)=>{ hRow.getCell(i+1).value = h; });
+  dlStyleHeaderRow(hRow, PNPA_DL_OUT_HEADERS.length);
+  rows.forEach((r, ri)=>{
+    const row = ws.getRow(ri+2);
+    row.getCell(1).value = r[PC.REGION]; row.getCell(2).value = r[PC.BRANCH];
+    row.getCell(3).value = r[PC.SCHEME]; row.getCell(4).value = r[PC.ACCT]; row.getCell(4).numFmt = '0';
+    row.getCell(5).value = r[PC.NAME]; row.getCell(6).value = pnpaAddressFor(r[PC.ACCT], r[PC.CUST_ID]);
+    row.getCell(7).value = Number(r[PC.OS])||0; row.getCell(7).numFmt = '0.00';
+    row.getCell(8).value = Number(r[PC.CADU])||0; row.getCell(8).numFmt = '0.00';
+    row.getCell(9).value = Number(r[PC.LIMIT])||0; row.getCell(9).numFmt = '0.00';
+    row.getCell(10).value = r[PC.REVIEW]; row.getCell(11).value = r[PC.REASON];
+    row.getCell(12).value = r[PC.CUSTNPADATE]; row.getCell(13).value = r[PC.CUST_ID];
+    if(ri % 2 === 1){
+      for(let fc=1; fc<=PNPA_DL_OUT_HEADERS.length; fc++){ row.getCell(fc).fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F5F3'}}; }
+    }
+  });
+  ws.columns.forEach((col,i)=>{ col.width = PNPA_DL_OUT_WIDTHS[i]; });
+  if(rows.length){ ws.autoFilter = { from:{row:1,column:1}, to:{row:rows.length+1,column:PNPA_DL_OUT_HEADERS.length} }; }
+}
+// Branch-locked via the already-existing pnpaLoggedInBranchName(), same
+// resolver this app's own PNPA Slippage tab already uses.
+function dlPnpaSourceRows(kind){
+  const rows = kind==='daily' ? (PNPA_DATA?PNPA_DATA.rows:[])
+    : kind==='weekly' ? (PNPA_WEEKLY_DATA?PNPA_WEEKLY_DATA.rows:[])
+    : (PNPA_MONTHLY_DATA?PNPA_MONTHLY_DATA.rows:[]);
+  const branch = pnpaLoggedInBranchName(rows.length ? rows : (PNPA_DATA?PNPA_DATA.rows:[]));
+  return branch ? rows.filter(r=>r[PC.BRANCH]===branch) : rows;
+}
+function dlExportPnpaDaily(){
+  ensurePnpaDataLoaded(()=>{
+    const today = new Date();
+    const rows = dlPnpaSourceRows('daily').filter(r=>pnpaSlipBucketOf(r[PC.CUSTNPADATE], today)==='today');
+    dlExportWorkbook([{name:'PNPA_Daily_Today', rows}], 'PNPA_Daily_Today_' + dateToInputValue(new Date()) + '.xlsx', dlWritePnpaSheet);
+  }, () => showToast('Could not load Daily PNPA data.'));
+}
+function dlExportPnpaWeekly(){
+  ensurePnpaWeeklyDataLoaded(()=>{
+    dlExportWorkbook([{name:'PNPA_Weekly', rows: dlPnpaSourceRows('weekly')}], 'PNPA_Weekly_' + dateToInputValue(new Date()) + '.xlsx', dlWritePnpaSheet);
+  });
+}
+function dlExportPnpaMonthly(){
+  ensurePnpaMonthlyDataLoaded(()=>{
+    dlExportWorkbook([{name:'PNPA_Monthly', rows: dlPnpaSourceRows('monthly')}], 'PNPA_Monthly_' + dateToInputValue(new Date()) + '.xlsx', dlWritePnpaSheet);
+  });
+}
+const PNPA_DL_EXPORTS = [
+  {id:'pnpadaily', title:"Daily PNPA — Today's Slippage", desc:'Accounts whose Cust NPA Date is today.', fn:'dlExportPnpaDaily', icon:DL_ICON_CLOCK, color:'indigo'},
+  {id:'pnpaweekly', title:'Weekly PNPA', desc:"This week's slippage, as uploaded (already period-scoped by Head Office).", fn:'dlExportPnpaWeekly', icon:DL_ICON_CAL_DAY, color:'gold'},
+  {id:'pnpamonthly', title:'Monthly PNPA', desc:"This month's slippage, as uploaded (already period-scoped by Head Office).", fn:'dlExportPnpaMonthly', icon:DL_ICON_CAL_RANGE, color:'teal'},
+];
+
 const DL_EXPORTS = [
   {id:'complete', title:'Complete NPA List', desc:'Every account in the current NPA book, one sheet.', fn:'dlExportComplete', icon:DL_ICON_LIST, color:'jade'},
   {id:'assetcode', title:'Asset Code wise NPA List', desc:'Pick all 5 categories in one workbook, or any single category on its own.', fn:'dlExportAssetCodeWise', icon:DL_ICON_LAYERS, color:'gold'},
@@ -5657,10 +5721,11 @@ const DL_EXPORTS = [
 const DL_TAB_GROUPS = [
   {id:'npa', label:'NPA', exports: DL_EXPORTS},
   {id:'kccoverdue', label:'KCC Overdue', exports: KCC_DL_EXPORTS},
+  {id:'pnpa', label:'PNPA', exports: PNPA_DL_EXPORTS},
 ];
 // Icons for the tab row itself (separate from each card's own icon above),
 // keyed by DL_TAB_GROUPS id.
-const DL_TAB_ICONS = { npa: DL_ICON_LIST, kccoverdue: DL_ICON_CLOCK };
+const DL_TAB_ICONS = { npa: DL_ICON_LIST, kccoverdue: DL_ICON_CLOCK, pnpa: DL_ICON_CAL_DAY };
 let dlActiveTab = DL_TAB_GROUPS[0].id;
 const DL_DOWNLOAD_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
 function setDlTab(id){ dlActiveTab = id; renderNpaDownloadView(); }
@@ -9590,6 +9655,9 @@ window.dlExportThisFY = dlExportThisFY;
 window.dlExportKccThisMonth = dlExportKccThisMonth;
 window.dlExportKccThisFY = dlExportKccThisFY;
 window.dlExportKccTotal = dlExportKccTotal;
+window.dlExportPnpaDaily = dlExportPnpaDaily;
+window.dlExportPnpaWeekly = dlExportPnpaWeekly;
+window.dlExportPnpaMonthly = dlExportPnpaMonthly;
 window.setDlTab = setDlTab;
 
 /* ---------- Nav / view switching ---------- */
