@@ -47,6 +47,27 @@
     errorEl.textContent = text || ' ';
     errorEl.classList.toggle('ok', !!ok);
   }
+  // Alok's request, 2026-10-07 (same change made to the production site's
+  // own js/splash.js): every real login should force a hard refresh, so a
+  // long-open tab can never keep running whatever JS/CSS it happened to
+  // load before the latest deploy. Clears every Cache Storage entry except
+  // the dedicated offline-data cache (so "Download for Offline" survives
+  // this), then reloads outright. sessionStorage's 'upgb-splash-unlocked'
+  // flag is already set by the time this runs, so the reload lands
+  // straight back in the app, branch-scoped exactly as just logged in --
+  // it does not ask for the Sol ID a second time.
+  function hardRefreshAfterLogin() {
+    try {
+      if ('caches' in window) {
+        caches.keys()
+          .then(names => Promise.all(names.filter(n => n !== 'recovery-dashboard-data').map(n => caches.delete(n))))
+          .catch(() => {})
+          .then(() => location.reload());
+        return;
+      }
+    } catch (e) {}
+    location.reload();
+  }
   function unlock(solId) {
     locked = true;
     setError('Welcome, ' + SOL_BY_ID[solId], true);
@@ -66,7 +87,7 @@
     try { window.dispatchEvent(new CustomEvent('upgb-pin-unlocked')); } catch (e) {}
     setTimeout(() => {
       screen.classList.add('unlocked');
-      setTimeout(() => { screen.style.display = 'none'; }, 700);
+      setTimeout(hardRefreshAfterLogin, 700);
     }, reduceMotion ? 0 : 350);
   }
   function reject() {
