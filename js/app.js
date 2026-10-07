@@ -7610,6 +7610,26 @@ function formatPnpaReasons(raw){
   return String(raw||'').split(',').map(s=>s.trim()).filter(Boolean)
     .map(s=>s==='LimReview'?'Limit Review':s).join(', ');
 }
+// PNPA-specific header detection: checks EVERY sheet in the uploaded workbook
+// (not just a /pnpa/i name guess) and the first 20 rows of each (not just
+// 10), picking whichever row matches the most of the 6 real required PNPA
+// columns. More resilient than a single guessed sheet + a 3-word hint list,
+// which still failed on a real Monthly PNPA file (2026-10-07) despite the
+// first header-row-detection fix. CSV has only one implicit "sheet", so
+// callers pass [allRows] for that case.
+const PNPA_REQUIRED_HINTS = ['accountno','branch','schemecode','balanceamount','cadu','region'];
+function findPnpaHeaderRow(sheetsRows, requiredHints){
+  let best = { rows: sheetsRows[0]||[], hIdx: 0, matchCount: -1 };
+  for(const rows of sheetsRows){
+    for(let i=0; i<Math.min(20, rows.length); i++){
+      const normed = (rows[i]||[]).map(normHeader);
+      const matchCount = requiredHints.filter(h=>normed.includes(h)).length;
+      if(matchCount > best.matchCount){ best = { rows, hIdx: i, matchCount }; }
+      if(matchCount === requiredHints.length) return best;
+    }
+  }
+  return best;
+}
 function parsePnpaRows(headerCells, dataRows){
   const header = headerCells.map(normHeader);
   const idx = (name) => header.indexOf(normHeader(name));
@@ -7667,20 +7687,21 @@ async function handlePnpaUpload(evt){
   const reader = new FileReader();
   reader.onerror = function(){ statusEl.innerHTML = `<div class="upload-status err">⚠ Failed to read the file from disk.</div>`; };
   reader.onload = function(e){
+    let header; // declared here, outside try, so catch can read it below
     try{
-      const headerHints = ['accountno','schemecode','balanceamount'];
       let allRows, hIdx;
       if(isCsv){
         allRows = parseCSV(String(e.target.result));
-        hIdx = findHeaderRowIndex(allRows, headerHints);
+        hIdx = findPnpaHeaderRow([allRows], PNPA_REQUIRED_HINTS).hIdx;
       } else {
         const data = new Uint8Array(e.target.result);
         const wb = XLSX.read(data, {type:'array'});
-        const sheetName = wb.SheetNames.find(n=>/pnpa/i.test(n)) || wb.SheetNames[0];
-        allRows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {header:1, raw:true, defval:''});
-        hIdx = findHeaderRowIndex(allRows, headerHints);
+        const sheetsRows = wb.SheetNames.map(n=>XLSX.utils.sheet_to_json(wb.Sheets[n], {header:1, raw:true, defval:''}));
+        const best = findPnpaHeaderRow(sheetsRows, PNPA_REQUIRED_HINTS);
+        allRows = best.rows; hIdx = best.hIdx;
       }
-      const header = allRows[hIdx]||[], dataRows = allRows.slice(hIdx+1);
+      header = allRows[hIdx]||[];
+      const dataRows = allRows.slice(hIdx+1);
       const rows = parsePnpaRows(header, dataRows);
       if(!rows.length) throw new Error('No account rows found in this file.');
       const guessed = parseAsOnDateFromFilename(file.name);
@@ -7695,7 +7716,11 @@ async function handlePnpaUpload(evt){
       if(publishBtn) publishBtn.disabled = false;
       if(document.querySelector('.view.active')?.dataset.view==='pnpa') renderPnpaDashboardBody();
     } catch(err){
-      statusEl.innerHTML = `<div class="upload-status err">⚠ Could not read this file: ${esc(err.message||err)}</div>`;
+      let msg = err.message||err;
+      if(/Missing required column/.test(String(msg)) && header && header.length){
+        msg += ' Row used as header: ' + header.filter(Boolean).slice(0,8).join(' | ') + (header.length>8 ? ' …' : '');
+      }
+      statusEl.innerHTML = `<div class="upload-status err">⚠ Could not read this file: ${esc(msg)}</div>`;
     }
   };
   if(isCsv) reader.readAsText(file); else reader.readAsArrayBuffer(file);
