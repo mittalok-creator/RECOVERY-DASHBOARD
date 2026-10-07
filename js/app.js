@@ -512,8 +512,64 @@ function buildOtsApplicationFormHTML(row, d){
     + '</div>';
 }
 
+/* "(-)ve P&L impact permission" letter -- a fixed-format English
+   compliance letter (Branch Manager -> Regional Manager), auto-appended
+   into the SAME combined PDF whenever an account's typed OTS Amount
+   results in a negative Impact on P&L (Alok's own reference document,
+   2026-10-07: "jab bhi application form print karen... agar negative
+   P&L par aaye to ye format bhi us application k sath hi pdf... 1 hi
+   pdf main"). Ported verbatim from NPA-DASHBOARD's own copy of this
+   same feature. Reuses the exact UPGB letterhead logo and formal-letter
+   visual language the Hindi application letter already uses, in plain
+   English. Date is today's date in this app's own DD-MM-YYYY convention
+   (fmtDate) -- unlike the Hindi letter's own deliberate date-format
+   exception, this is a freshly-generated document with no pre-existing
+   external proforma date convention to preserve. */
+function buildNegativePLImpactLetterHTML(row, d, impactAmt){
+  const today = fmtDate(new Date());
+  const branch = row[C.SOL_DESC]||'';
+  const name = row[C.NAME]||'';
+  const acctNo = row[C.ACCT_NO]||'';
+  const outstanding = fmtINR2(d.osatots);
+  const otsAmt = fmtINR2(d.otsamt);
+  const impactStr = '₹-' + Number(Math.abs(impactAmt)).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+  return '<div style="font-family:Arial,\'Noto Sans\',sans-serif; width:800px; padding:40px 44px; color:#111; font-size:14px; line-height:1.65; background:#fff;">'
+    + '<div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #111; padding-bottom:10px; margin-bottom:14px;">'
+    +   '<div>'
+    +     '<div style="font-weight:800; font-size:16px;">UTTAR PRADESH GRAMIN BANK</div>'
+    +     '<div style="font-size:11px;">(Scheduled Bank Owned by Government)</div>'
+    +   '</div>'
+    +   '<img src="' + OTS_APP_LOGO_DATA_URI + '" alt="Uttar Pradesh Gramin Bank" style="height:70px;width:auto;display:block;">'
+    + '</div>'
+    + '<div style="text-align:right; font-weight:700; margin-bottom:14px;">Date: ' + today + '</div>'
+    + '<div>To,</div>'
+    + '<div style="margin-top:6px; font-weight:700;">The Regional Manager<br>Uttar Pradesh Gramin Bank<br>Regional Office - Hathras</div>'
+    + '<div style="margin-top:14px; font-weight:700;">Subject: Request for Permission Regarding (-)ve P&amp;L impact in One-Time Settlement (OTS) Proposal</div>'
+    + '<div style="margin-top:14px; font-weight:700;">Respected Sir,</div>'
+    + '<div style="margin-top:12px;">This is to bring to your kind attention that we have received a One-Time Settlement (OTS) proposal from the borrower <b>' + esc(name) + '</b>, account number <b>' + esc(acctNo) + '</b>, under branch <b>' + esc(branch) + '</b>.</div>'
+    + '<div style="margin-top:12px;">We have done regular follow up from borrower/legal heirs regarding recovery of loan and exhausted all recovery efforts, borrower/legal heirs approached Branch to close the account under Bank\'s OTS scheme. The total outstanding amount in the said account is <b>' + outstanding + '</b>, whereas the proposed OTS amount is <b>' + otsAmt + '</b>. After evaluating the proposal, it has been observed that accepting the OTS would result in (-)ve P&amp;L impact of <b>' + impactStr + '</b> to the bank.</div>'
+    + '<div style="margin-top:12px;">Currently borrower/legal heirs’ financial condition is very poor and most of the money spent on health issues of family members. Also, there is no significant source of regular income.</div>'
+    + '<div style="margin-top:12px;">Hence, considering the borrower’s current financial position and non-availability of regular recovery options also there is no future scope of better OTS Proposal from borrower, this OTS appears to be the most feasible resolution strategy to minimize further deterioration of the asset and prevent additional provisioning.</div>'
+    + '<div style="margin-top:12px;">In view of the above, we request you to kindly permit us for considering this OTS proposal with (-) ve P&amp;L impact.</div>'
+    + '<div style="margin-top:24px;">Yours faithfully,</div>'
+    + '<div style="margin-top:48px;">Branch Manager<br>Branch – ' + esc(branch) + '</div>'
+    + '<div style="border-top:1px solid #111; margin-top:28px; padding-top:10px; text-align:center; font-weight:700;">Recommendation/Views of Department</div>'
+    + '<div style="margin-top:10px;">In view of above and stated by Branch Manager, we recommend accepting OTS proposal of above account.</div>'
+    + '<div style="display:flex; justify-content:space-between; margin-top:56px; font-weight:700;">'
+    +   '<div style="border-top:1px solid #111; padding-top:4px;">Assistant Manager</div>'
+    +   '<div style="border-top:1px solid #111; padding-top:4px;">Manager</div>'
+    +   '<div style="border-top:1px solid #111; padding-top:4px;">Sr. Manager</div>'
+    + '</div>'
+    + '<div style="text-align:center; font-weight:700; margin-top:24px;">Permission of Regional Manager</div>'
+    + '<div style="text-align:right; margin-top:48px; font-weight:700; border-top:1px solid #111; display:inline-block; float:right; padding-top:4px;">Regional Manager</div>'
+    + '<div style="clear:both;"></div>'
+    + '<div style="margin-top:32px; border:1px solid #111; padding:8px 12px; text-align:center; font-size:11px;">Regional Office: Munshi Gajadhar Singh Marg, Aligarh Road, Hathras – 204101</div>'
+    + '</div>';
+}
+
 let __otsAppRows = [];
 let __otsAppLetters = [];
+let __otsAppNegativePLLetters = [];
 // Alok, 2026-09-27: "agar data already fetch ho raha hai to ye ban hi
 // jayega agar ismain data nahi milta to all required data fill karne k
 // liye aaye aur application generate ho jaye but show tab hi kare jab
@@ -669,32 +725,46 @@ function otsAppReadSettlementFields(idx, alertMsg){
 function otsAppRenderPreview(){
   const wrap = document.getElementById('otsAppPreviewWrap');
   const letters = __otsAppLetters;
+  const negativePLLetters = __otsAppNegativePLLetters;
   if(!wrap || !letters.length) return;
   const actionsHtml = '<div class="ots-app-letter-actions">'
-    +   '<button type="button" class="ots-app-btn-pill" onclick="otsAppPrint()">🖨 <span>Print' + (letters.length>1?' All':'') + '</span></button>'
+    +   '<button type="button" class="ots-app-btn-pill" onclick="otsAppPrint()">🖨 <span>Print' + (letters.length>1||negativePLLetters.length?' All':'') + '</span></button>'
     +   '<button type="button" class="ots-app-btn-pill" onclick="otsAppSavePdf()">⬇ <span>Save as PDF</span></button>'
     +   '<button type="button" class="ots-app-btn-pill accent" onclick="otsAppSharePdf()">📤 <span>Share on WhatsApp</span></button>'
     + '</div>';
+  let html;
   if(letters.length===1){
-    wrap.innerHTML = '<div class="card ots-app-letter-frame">'
+    html = '<div class="card ots-app-letter-frame">'
       + '<div class="ots-app-letter-frame-head">'
       +   '<div class="ots-app-letter-frame-title">Generated Application Form</div>'
       +   '<div class="ots-app-ready-badge"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Ready</div>'
       + '</div>'
       + '<div class="ots-app-letter-paper">' + letters[0].html + '</div>'
-      + actionsHtml
+      + (negativePLLetters.length ? '' : actionsHtml)
       + '</div>';
   } else {
-    wrap.innerHTML = '<div class="card ots-app-letter-frame">'
+    html = '<div class="card ots-app-letter-frame">'
       + '<div class="ots-app-letter-frame-head">'
       +   '<div class="ots-app-letter-frame-title">Generated Application Forms (' + letters.length + ')</div>'
       +   '<div class="ots-app-ready-badge"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Ready</div>'
       + '</div>'
-      + actionsHtml
+      + (negativePLLetters.length ? '' : actionsHtml)
       + letters.map((l,i)=>'<div class="ots-app-letter-caption">Application Form — Account ' + (i+1) + ' of ' + letters.length + ' (A/c No. ' + esc(String(l.row[C.ACCT_NO]||'—')) + ')</div>'
           + '<div class="ots-app-letter-paper">' + l.html + '</div>').join('')
       + '</div>';
   }
+  if(negativePLLetters.length){
+    html += '<div class="card ots-app-letter-frame ots-app-negpl-frame">'
+      + '<div class="ots-app-letter-frame-head">'
+      +   '<div class="ots-app-letter-frame-title">⚠ Negative P&amp;L Impact — Permission Request (' + negativePLLetters.length + ')</div>'
+      + '</div>'
+      + '<div class="ots-app-letter-caption">Auto-included in the same PDF below, since the typed OTS Amount results in a negative P&amp;L impact.</div>'
+      + negativePLLetters.map(l=>'<div class="ots-app-letter-caption">Permission Request — A/c No. ' + esc(String(l.row[C.ACCT_NO]||'—')) + '</div>'
+          + '<div class="ots-app-letter-paper">' + l.html + '</div>').join('')
+      + actionsHtml
+      + '</div>';
+  }
+  wrap.innerHTML = html;
   wrap.scrollIntoView({behavior:'smooth', block:'start'});
   const genBtn = document.getElementById('otsAppGenerateBtn');
   if(genBtn){ genBtn.classList.remove('success'); void genBtn.offsetWidth; genBtn.classList.add('success'); }
@@ -705,6 +775,7 @@ function otsAppGenerate(){
   const rows = __otsAppRows;
   if(!rows.length) return;
   const letters = [];
+  const negativePLLetters = [];
   for(let idx=0; idx<rows.length; idx++){
     const row = rows[idx];
     const alertMsg = rows.length>1
@@ -719,8 +790,23 @@ function otsAppGenerate(){
       tokendate: f.tokenDate, restdate: f.restDate, purpose: f.purpose, district
     });
     letters.push({ row, html });
+    // Negative P&L impact check -- same formula the on-screen OTS
+    // Calculator's own recalcLoan() uses (Impact = OTS Amount - Total
+    // P&L), via the already-existing, DOM-free computeSlot()/slotFromRow().
+    // Skipped (not guessed) if the slot's own data can't support a real
+    // Total P&L figure. Real rows only -- otsAppGenerateManual() below
+    // has no system data to compute Provision/Total P&L from, so it
+    // never attempts this check at all.
+    const slot = computeSlot(slotFromRow(row));
+    if(slot && typeof slot.totalPL==='number'){
+      const impact = f.otsAmt - slot.totalPL;
+      if(impact < 0){
+        negativePLLetters.push({ row, html: buildNegativePLImpactLetterHTML(row, { osatots: f.outstanding, otsamt: f.otsAmt }, impact) });
+      }
+    }
   }
   __otsAppLetters = letters;
+  __otsAppNegativePLLetters = negativePLLetters;
   otsAppRenderPreview();
 }
 window.otsAppGenerate = otsAppGenerate;
@@ -767,6 +853,9 @@ function otsAppGenerateManual(){
     acctOpenDate, osatots: f.outstanding, otsamt: f.otsAmt, tokenamt: f.tokenAmt,
     tokendate: f.tokenDate, restdate: f.restDate, purpose: f.purpose, district
   }) }];
+  // Manual-entry rows have no real Asset Code/NPA Date/Provision data for
+  // computeSlot() to work with meaningfully -- no negative-P&L check here.
+  __otsAppNegativePLLetters = [];
   otsAppRenderPreview();
 }
 window.otsAppGenerateManual = otsAppGenerateManual;
@@ -774,6 +863,7 @@ function otsAppPrint(){
   if(!__otsAppLetters.length) return;
   document.getElementById('printArea').innerHTML = '<div class="ots-app-print-wrap">'
     + __otsAppLetters.map(l=>'<div class="ots-app-letter-page">' + l.html + '</div>').join('')
+    + __otsAppNegativePLLetters.map(l=>'<div class="ots-app-letter-page">' + l.html + '</div>').join('')
     + '</div>';
   printWithPageSize('size:A4;margin:12mm');
 }
@@ -826,6 +916,15 @@ async function otsAppBuildCombinedPdfBlob(){
   for(let i=0;i<__otsAppLetters.length;i++){
     const canvas = await otsAppRenderLetterCanvas(__otsAppLetters[i].html);
     if(i>0) doc.addPage();
+    addCanvasPagesToDoc(doc, canvas, margin, usableW, usableH);
+  }
+  // Negative-P&L permission letters, if any, are appended after every
+  // regular application-form letter, into this same doc -- __otsAppLetters
+  // always has at least 1 entry by the time this runs (otsAppGenerate()
+  // returns early otherwise), so every entry here needs its own new page.
+  for(let i=0;i<__otsAppNegativePLLetters.length;i++){
+    const canvas = await otsAppRenderLetterCanvas(__otsAppNegativePLLetters[i].html);
+    doc.addPage();
     addCanvasPagesToDoc(doc, canvas, margin, usableW, usableH);
   }
   return doc.output('blob');
