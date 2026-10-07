@@ -7700,6 +7700,14 @@ async function handlePnpaUpload(evt){
         const best = findPnpaHeaderRow(sheetsRows, PNPA_REQUIRED_HINTS);
         allRows = best.rows; hIdx = best.hIdx;
       }
+      // Distinguish "every sheet parsed to zero rows" (an XLSB/codec parsing
+      // problem, not a header-matching one) from "a header row was found but
+      // doesn't match" -- both used to fall through to the same generic
+      // "Missing required column(s)" error below, which made them
+      // indistinguishable from a screenshot. 2026-10-07.
+      if(!allRows.length){
+        throw new Error('This file\'s sheet(s) appear to contain no readable rows. If this is a .xlsb file, try re-saving it as .xlsx or .csv and uploading that instead.');
+      }
       header = allRows[hIdx]||[];
       const dataRows = allRows.slice(hIdx+1);
       const rows = parsePnpaRows(header, dataRows);
