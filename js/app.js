@@ -2933,11 +2933,11 @@ function renderResults(matches, mode){
 function exportSearchResults(){
   const sorted = applySort(resultListState.list, resultListState.sort);
   if(!sorted.length) return;
-  const rows = sorted.map(c=>[c.acctNo, c.name, c.branch, c.asset, c.os]);
+  const rows = sorted.map(c=>[idCellValue(c.acctNo), c.name, c.branch, c.asset, c.os]);
   exportRowsToExcel(
     `Search_Results_${dateToInputValue(new Date())}.xlsx`, 'Search Results',
     ['Account No','Customer','Branch','Asset','O/S Balance'], rows,
-    [null,null,null,null,XL_INR_FMT]
+    ['0',null,null,null,XL_INR_FMT]
   );
   showToast(`✓ ${sorted.length} row${sorted.length>1?'s':''} exported`);
 }
@@ -3980,7 +3980,7 @@ async function exportOtsExcel(){
   r += 2;
 
   const infoPairs = [
-    ['Cust ID', String(custRow[C.CUST_ID]||''), 'SB A/c', String(custRow[C.SB_ACCT]||'')],
+    ['Cust ID', idCellValue(custRow[C.CUST_ID]), 'SB A/c', String(custRow[C.SB_ACCT]||'')],
     ['Mobile', String(custRow[C.PHONE]||''), 'SB Balance', custRow[C.SB_BAL]===''?0:custRow[C.SB_BAL]],
     ['PAN', String(custRow[C.PAN]||''), '', ''],
     ['Aadhar', String(custRow[C.AADHAR]||''), '', ''],
@@ -3988,7 +3988,7 @@ async function exportOtsExcel(){
   infoPairs.forEach((row,i)=>{
     const rr = r+i;
     set(`A${rr}`, row[0], {font:{bold:true, color:{argb:'FF333333'}}, border:false});
-    set(`B${rr}`, row[1], {font:{color:{argb:'FF000000'}}, border:false});
+    set(`B${rr}`, row[1], {font:{color:{argb:'FF000000'}}, numFmt: row[0]==='Cust ID'?'0':undefined, border:false});
     if(row[2]){
       set(`C${rr}`, row[2], {font:{bold:true, color:{argb:'FF333333'}}, border:false});
       ws.mergeCells(rr,4,rr,SPAN);
@@ -4023,7 +4023,7 @@ async function exportOtsExcel(){
   // ---- Particulars table (main sheet) ----
   const headerRow = r;
   set(`A${headerRow}`, 'Particulars', {font:{bold:true, color:{argb:'FF000000'}}});
-  slots.forEach((s,i)=>set(`${cols[i]}${headerRow}`, s.acctNo, {font:{bold:true, color:{argb:'FF000000'}}, align:{horizontal:'center'}}));
+  slots.forEach((s,i)=>set(`${cols[i]}${headerRow}`, idCellValue(s.acctNo), {font:{bold:true, color:{argb:'FF000000'}}, align:{horizontal:'center'}, numFmt:'0'}));
 
   // Same rows the print sheet bolds, so the two read identically on paper.
   const STRONG_ROWS = new Set(['O/S Balance','Total Dues','Total P&L','OTS Amount','Total Sacrifice','Impact on P&L']);
@@ -4262,6 +4262,26 @@ function normId(v){
   if(isFinite(n) && /^[0-9.]+$/.test(s)) return String(Math.round(n));
   return s;
 }
+// Returns a value fit for an Excel cell representing a numeric-looking ID
+// (Account No, Sol ID, Customer ID): a real Number when the raw value is a
+// clean, non-leading-zero digit string short enough to round-trip exactly
+// through IEEE-754 (<=15 digits -- real Account Nos never exceed this, per
+// the live data), so Excel shows/sorts/filters it as a real number instead
+// of "Number Stored as Text"; the original string otherwise -- a real
+// Customer ID is often alphanumeric (e.g. "A03728572", ~1 in 5 rows) and a
+// real Account No can carry a genuine leading zero (e.g.
+// "070426110000005", confirmed in live SMA data) where a numeric cast
+// would corrupt the value by dropping it, so those stay text, correctly.
+function idCellValue(raw){
+  const s = (raw==null ? '' : String(raw)).trim();
+  if(s === '') return '';
+  if(/^\d+$/.test(s) && s.length <= 15 && !(s.length > 1 && s[0] === '0')) return Number(s);
+  return s;
+}
+// Convenience for the common row.getCell(n) pattern -- numFmt='0' is a
+// harmless no-op on the text fallback above (Excel only applies a numFmt
+// to an actual numeric cell), so this is safe to call unconditionally.
+function setIdCell(cell, raw){ cell.value = idCellValue(raw); cell.numFmt = '0'; }
 // Re-keys an Account No./Customer ID -> Address map through normId() --
 // used right after DATA.addressList/addressListByCustomer are loaded
 // (see their own init comment) so a map published under an older version
@@ -5544,9 +5564,9 @@ function dlWriteSheet(ws, rows){
   dlStyleHeaderRow(hRow, DL_OUT_HEADERS.length);
   rows.forEach((r, ri)=>{
     const row = ws.getRow(ri+2);
-    row.getCell(1).value = r[C.SOL_ID]; row.getCell(2).value = r[C.SOL_DESC];
-    row.getCell(3).value = r[C.ACCT_NO]; row.getCell(3).numFmt = '0';
-    row.getCell(4).value = r[C.CUST_ID]; row.getCell(5).value = r[C.SCHEME];
+    setIdCell(row.getCell(1), r[C.SOL_ID]); row.getCell(2).value = r[C.SOL_DESC];
+    setIdCell(row.getCell(3), r[C.ACCT_NO]);
+    setIdCell(row.getCell(4), r[C.CUST_ID]); row.getCell(5).value = r[C.SCHEME];
     row.getCell(6).value = r[C.NAME]; row.getCell(7).value = r[C.ADDR];
     row.getCell(8).value = Number(r[C.OUTBAL])||0; row.getCell(8).numFmt = '0.00';
     const npaDate = toDate(r[C.NPA_DT]);
@@ -5697,8 +5717,8 @@ function dlWriteKccSheet(ws, rows){
   dlStyleHeaderRow(hRow, KCC_DL_OUT_HEADERS.length);
   rows.forEach((r, ri)=>{
     const row = ws.getRow(ri+2);
-    row.getCell(1).value = r[KC.BRANCH]; row.getCell(2).value = r[KC.ACCT]; row.getCell(2).numFmt = '0';
-    row.getCell(3).value = r[KC.CUST_ID]; row.getCell(4).value = r[KC.SCHEME]; row.getCell(5).value = r[KC.NAME];
+    row.getCell(1).value = r[KC.BRANCH]; setIdCell(row.getCell(2), r[KC.ACCT]);
+    setIdCell(row.getCell(3), r[KC.CUST_ID]); row.getCell(4).value = r[KC.SCHEME]; row.getCell(5).value = r[KC.NAME];
     row.getCell(6).value = kccovAddressFor(r[KC.ACCT], r[KC.CUST_ID]);
     row.getCell(7).value = Number(r[KC.OS])||0; row.getCell(7).numFmt = '0.00';
     row.getCell(8).value = Number(r[KC.CADU])||0; row.getCell(8).numFmt = '0.00';
@@ -5783,13 +5803,13 @@ function dlWritePnpaSheet(ws, rows){
   rows.forEach((r, ri)=>{
     const row = ws.getRow(ri+2);
     row.getCell(1).value = r[PC.REGION]; row.getCell(2).value = r[PC.BRANCH];
-    row.getCell(3).value = r[PC.SCHEME]; row.getCell(4).value = r[PC.ACCT]; row.getCell(4).numFmt = '0';
+    row.getCell(3).value = r[PC.SCHEME]; setIdCell(row.getCell(4), r[PC.ACCT]);
     row.getCell(5).value = r[PC.NAME]; row.getCell(6).value = pnpaAddressFor(r[PC.ACCT], r[PC.CUST_ID]);
     row.getCell(7).value = Number(r[PC.OS])||0; row.getCell(7).numFmt = '0.00';
     row.getCell(8).value = Number(r[PC.CADU])||0; row.getCell(8).numFmt = '0.00';
     row.getCell(9).value = Number(r[PC.LIMIT])||0; row.getCell(9).numFmt = '0.00';
     row.getCell(10).value = r[PC.REVIEW]; row.getCell(11).value = r[PC.REASON];
-    row.getCell(12).value = r[PC.CUSTNPADATE]; row.getCell(13).value = r[PC.CUST_ID];
+    row.getCell(12).value = r[PC.CUSTNPADATE]; setIdCell(row.getCell(13), r[PC.CUST_ID]);
     if(ri % 2 === 1){
       for(let fc=1; fc<=PNPA_DL_OUT_HEADERS.length; fc++){ row.getCell(fc).fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F5F3'}}; }
     }
@@ -6881,10 +6901,10 @@ async function exportNpaBranchHistory(){
   const rows = [];
   entries.forEach(e=>{
     e.branches.forEach(b=>{
-      rows.push([ isoToDisplay(e.date), b.solId, b.branchName, b.count, +(b.os/100000).toFixed(2) ]);
+      rows.push([ isoToDisplay(e.date), idCellValue(b.solId), b.branchName, b.count, +(b.os/100000).toFixed(2) ]);
     });
   });
-  await exportRowsToExcel('UPGB_NPA_Daily_Branch_History.xlsx', 'NPA Daily History', headers, rows, [null,null,null,null,'0.00']);
+  await exportRowsToExcel('UPGB_NPA_Daily_Branch_History.xlsx', 'NPA Daily History', headers, rows, [null,'0',null,null,'0.00']);
 }
 window.exportNpaBranchHistory = exportNpaBranchHistory;
 
@@ -9056,8 +9076,10 @@ function kccovWriteDataSheet(ws, rows){
   ws.getRow(1).fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFDCEEE8'}};
   rows.forEach(r=>{
     const groupLabel = (KCCOV_BIFURCATION_GROUPS.find(g=>g.key===r.bucket)||{}).label || r.bucket;
-    ws.addRow([r.sol, r.branch, r.acctNo, r.bal, groupLabel, r.npaDate, r.fy, r.monthLabel]);
+    ws.addRow([idCellValue(r.sol), r.branch, idCellValue(r.acctNo), r.bal, groupLabel, r.npaDate, r.fy, r.monthLabel]);
   });
+  ws.getColumn(1).numFmt = '0';
+  ws.getColumn(3).numFmt = '0';
   ws.getColumn(6).numFmt = 'dd-mm-yyyy';
   for(let c=1;c<=8;c++) ws.getColumn(c).width = (c===2?22:(c===3?16:14));
   ws.views = [{state:'frozen', ySplit:1}];
@@ -9758,12 +9780,12 @@ function exportSmaSummary(){
   const d = SMA_DATA;
   if(!d || !d.rows) return;
   const rows = [...smaFilteredRows(d)].sort((a,b)=>b[SR.OS]-a[SR.OS]).slice(0,20)
-    .map((r,i)=>[i+1, r[SR.ACCT], r[SR.NAME], r[SR.BRANCH], r[SR.SCHEME], r[SR.SMACUST], r[SR.OS], r[SR.NON_FINANCIAL]?'Y':'']);
+    .map((r,i)=>[i+1, idCellValue(r[SR.ACCT]), r[SR.NAME], r[SR.BRANCH], r[SR.SCHEME], r[SR.SMACUST], r[SR.OS], r[SR.NON_FINANCIAL]?'Y':'']);
   if(!rows.length) return;
   exportRowsToExcel(
     `SMA_Top20_${dateToInputValue(new Date())}.xlsx`, 'SMA Top 20',
     ['Rank','Account No.','Name','Branch','Scheme','SMA Stage','O/S','Non-Financial'], rows,
-    [null,null,null,null,null,null,XL_INR_FMT,null]
+    [null,'0',null,null,null,null,XL_INR_FMT,null]
   );
   showToast(`✓ ${rows.length} account row${rows.length>1?'s':''} exported`);
 }
