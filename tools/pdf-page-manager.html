@@ -154,16 +154,17 @@
 
   <div id="dropzone" class="dropzone">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 3v5h5"/><path d="M12 11v6M9 14l3-3 3 3"/></svg>
-    <b>Open one or more PDF files</b>
+    <b>Open one or more PDF or image files</b>
     <span>Click to browse, or drag &amp; drop here — nothing is uploaded anywhere, everything stays in this browser tab</span>
   </div>
-  <input type="file" id="fileInput" accept="application/pdf" multiple>
+  <input type="file" id="fileInput" accept="application/pdf,image/*" multiple>
 
   <div class="toolbar">
     <div class="tbgroup">
       <button type="button" class="tbtn" id="btnOpen" title="Ctrl+O">📂 Open PDF</button>
-      <button type="button" class="tbtn" id="btnAdd" disabled title="Add selected pages from another PDF">➕ Add Pages</button>
-      <button type="button" class="tbtn" id="btnMerge" disabled title="Append/replace with another PDF">🔗 Merge PDFs</button>
+      <button type="button" class="tbtn" id="btnAdd" disabled title="Add selected pages from another PDF or image">➕ Add Pages</button>
+      <button type="button" class="tbtn" id="btnMerge" disabled title="Append/replace with another PDF or image">🔗 Merge PDFs</button>
+      <button type="button" class="tbtn" id="btnImagesToPdf" title="Import one or more images and build a PDF from them">🖼️ Images → PDF</button>
     </div>
     <div class="tbgroup">
       <button type="button" class="tbtn" id="btnRotL" disabled>↶ Rotate</button>
@@ -177,6 +178,7 @@
       <button type="button" class="tbtn" id="btnUndo" disabled title="Ctrl+Z">⤺ Undo</button>
       <button type="button" class="tbtn" id="btnRedo" disabled title="Ctrl+Y">⤻ Redo</button>
       <button type="button" class="tbtn primary" id="btnSave" disabled title="Ctrl+S">✔ Save &amp; Verify</button>
+      <button type="button" class="tbtn" id="btnShare" disabled title="Share via WhatsApp or download">📤 Share</button>
       <button type="button" class="tbtn" id="btnClear" disabled>Clear</button>
     </div>
   </div>
@@ -234,8 +236,9 @@
   pdfjsLib.GlobalWorkerOptions.workerSrc = '../js/vendor/pdf.worker.min.js';
 
   // ---- state ----
-  // sources[i] = { name, bytes:Uint8Array, pdfjsDoc, encrypted:false }
-  // pages[i]   = { srcIdx, pageIdx (0-based), rotation (our own ADDED delta, degrees) }
+  // sources[i] = { name, bytes:Uint8Array, kind:'pdf'|'image', failed,
+  //                pdfjsDoc (pdf only), mime, imageBitmap, imgWidth, imgHeight (image only) }
+  // pages[i]   = { srcIdx, pageIdx (0-based; always 0 for an image source), rotation (our own ADDED delta, degrees) }
   var sources = [];
   var pages = [];
   var selected = new Set();
@@ -247,8 +250,8 @@
   var renderGen = 0; // bumped on every render() so stale async thumbnail fills no-op
 
   var el = {};
-  ['msgBox','dropzone','fileInput','btnOpen','btnAdd','btnMerge','btnRotL','btnRotR','btnDup',
-   'btnRemove','btnReverse','btnExtract','btnUndo','btnRedo','btnSave','btnClear','countChip',
+  ['msgBox','dropzone','fileInput','btnOpen','btnAdd','btnMerge','btnImagesToPdf','btnRotL','btnRotR','btnDup',
+   'btnRemove','btnReverse','btnExtract','btnUndo','btnRedo','btnSave','btnShare','btnClear','countChip',
    'statusText','searchInput','btnFind','btnSelectAll','grid','previewTitle','zoomRange',
    'zoomMinus','zoomPlus','zoomFit','previewStage','btnDiag','toast','diagOverlay'
   ].forEach(function(id){ el[id] = document.getElementById(id); });
@@ -301,28 +304,78 @@
       (typeof pdfjsLib !== 'undefined' && pdfjsLib.PasswordException && err instanceof pdfjsLib.PasswordException));
   }
 
-  // Loads each File into a {name, bytes, pdfjsDoc} source entry. Skips (with
-  // a clear message) any password-protected file -- matches the original
-  // desktop app's own explicit "not supported yet" behaviour rather than
-  // throwing a raw exception at the user.
+  // Sniffs the real file kind from its own magic bytes -- deliberately does
+  // NOT trust file.type/extension (both can be empty or wrong depending on
+  // OS/browser). Unsupported image formats (PDFLib can only embed JPG/PNG)
+  // are rejected here with a clear message, same graceful-rejection style
+  // already used for a password-protected PDF below.
+  function detectFileKind(bytes){
+    function matches(sig, offset){
+      offset = offset || 0;
+      for(var i=0;i<sig.length;i++) if(bytes[offset+i] !== sig[i]) return false;
+      return true;
+    }
+    if(matches([0x25,0x50,0x44,0x46])) return {kind:'pdf'};                                  // %PDF
+    if(matches([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A])) return {kind:'image', mime:'image/png'};
+    if(matches([0xFF,0xD8,0xFF])) return {kind:'image', mime:'image/jpeg'};
+    if(matches([0x47,0x49,0x46,0x38])) return {kind:'rejected', message:'GIF images are not supported -- please convert to JPG or PNG first.'};
+    if(matches([0x52,0x49,0x46,0x46]) && matches([0x57,0x45,0x42,0x50], 8)) return {kind:'rejected', message:'WEBP images are not supported -- please convert to JPG or PNG first.'};
+    if(matches([0x42,0x4D])) return {kind:'rejected', message:'BMP images are not supported -- please convert to JPG or PNG first.'};
+    return {kind:'unknown'};
+  }
+
+  // Decodes a JPG/PNG into an <img> element (a valid CanvasImageSource for
+  // drawImage -- no createImageBitmap()/conversion step needed) plus its
+  // natural pixel dimensions.
+  function loadImageSource(file, bytes, mime){
+    return new Promise(function(resolve){
+      var url = URL.createObjectURL(new Blob([bytes], {type: mime}));
+      var img = new Image();
+      img.onload = function(){
+        URL.revokeObjectURL(url);
+        resolve({ name:file.name, bytes:bytes, kind:'image', mime:mime, pdfjsDoc:null,
+          imageBitmap:img, imgWidth:img.naturalWidth, imgHeight:img.naturalHeight, failed:null });
+      };
+      img.onerror = function(){
+        URL.revokeObjectURL(url);
+        resolve({ name:file.name, bytes:bytes, kind:'image', pdfjsDoc:null,
+          failed:'Could not decode image: ' + file.name });
+      };
+      img.src = url;
+    });
+  }
+
+  // Loads each File into a source entry, branching by its real detected
+  // kind (not file.type/extension). Skips (with a clear message) any
+  // password-protected PDF or unsupported image format -- matches the
+  // original desktop app's own explicit "not supported yet" behaviour
+  // rather than throwing a raw exception at the user.
   function loadSources(files){
     return Promise.all(files.map(function(file){
       return readFileAsBytes(file).then(function(bytes){
-        return pdfjsLib.getDocument({ data: bytes.slice() }).promise.then(function(doc){
-          return { name: file.name, bytes: bytes, pdfjsDoc: doc, failed: null };
-        }).catch(function(err){
-          return { name: file.name, bytes: bytes, pdfjsDoc: null,
-            failed: isPasswordError(err) ? 'Password-protected PDFs are not supported yet.' : ('Could not read ' + file.name + ': ' + (err && err.message || err)) };
-        });
+        var det = detectFileKind(bytes);
+        if(det.kind === 'pdf'){
+          return pdfjsLib.getDocument({ data: bytes.slice() }).promise.then(function(doc){
+            return { name: file.name, bytes: bytes, kind: 'pdf', pdfjsDoc: doc, failed: null };
+          }).catch(function(err){
+            return { name: file.name, bytes: bytes, kind: 'pdf', pdfjsDoc: null,
+              failed: isPasswordError(err) ? 'Password-protected PDFs are not supported yet.' : ('Could not read ' + file.name + ': ' + (err && err.message || err)) };
+          });
+        }
+        if(det.kind === 'image') return loadImageSource(file, bytes, det.mime);
+        if(det.kind === 'rejected') return { name: file.name, bytes: null, kind: 'unknown', pdfjsDoc: null, failed: det.message + ' (' + file.name + ')' };
+        return { name: file.name, bytes: null, kind: 'unknown', pdfjsDoc: null, failed: 'Unsupported file type: ' + file.name };
       }).catch(function(err){
-        return { name: file.name, bytes: null, pdfjsDoc: null, failed: 'Could not read ' + file.name + ': ' + (err && err.message || err) };
+        return { name: file.name, bytes: null, kind: 'unknown', pdfjsDoc: null, failed: 'Could not read ' + file.name + ': ' + (err && err.message || err) };
       });
     }));
   }
 
   function appendSourceAsPages(src, srcIdx){
     var out = [];
-    if(src.pdfjsDoc){
+    if(src.kind === 'image' && src.imageBitmap){
+      out.push({ srcIdx: srcIdx, pageIdx: 0, rotation: 0 });
+    } else if(src.pdfjsDoc){
       for(var p = 0; p < src.pdfjsDoc.numPages; p++) out.push({ srcIdx: srcIdx, pageIdx: p, rotation: 0 });
     }
     return out;
@@ -378,13 +431,24 @@
   });
   el.dropzone.addEventListener('drop', function(e){
     e.preventDefault(); el.dropzone.classList.remove('drag');
-    var files = Array.from(e.dataTransfer.files || []).filter(function(f){ return f.type === 'application/pdf' || /\.pdf$/i.test(f.name); });
+    var files = Array.from(e.dataTransfer.files || []).filter(function(f){
+      return f.type === 'application/pdf' || /\.pdf$/i.test(f.name) ||
+             f.type.indexOf('image/') === 0 || /\.(jpe?g|png|gif|webp|bmp)$/i.test(f.name);
+    });
     if(files.length) openPdfs(files, 'open');
-    else showMsg('err', 'Please drop PDF file(s).');
+    else showMsg('err', 'Please drop PDF or image file(s).');
   });
   el.btnOpen.addEventListener('click', function(){ pickFiles(function(files){ openPdfs(files, 'open'); }); });
   el.btnAdd.addEventListener('click', function(){ pickFiles(function(files){ openPdfs(files, 'add'); }); });
   el.btnMerge.addEventListener('click', function(){ pickFiles(function(files){ openPdfs(files, 'merge'); }); });
+  el.btnImagesToPdf.addEventListener('click', function(){
+    var prevAccept = el.fileInput.accept;
+    el.fileInput.accept = 'image/*';
+    pickFiles(function(files){
+      el.fileInput.accept = prevAccept;
+      openPdfs(files, 'open');
+    });
+  });
 
   // ---------- undo / redo ----------
   function snapshot(){ return JSON.stringify({ pages: pages, selected: Array.from(selected) }); }
@@ -498,7 +562,17 @@
   function thumbKey(p){ return p.srcIdx + '_' + p.pageIdx; }
 
   function renderPageCanvas(srcIdx, pageIdx, scale){
-    var doc = sources[srcIdx] && sources[srcIdx].pdfjsDoc;
+    var src = sources[srcIdx];
+    if(!src) return Promise.resolve(null);
+    if(src.kind === 'image'){
+      if(!src.imageBitmap) return Promise.resolve(null);
+      var icanvas = document.createElement('canvas');
+      icanvas.width = Math.max(1, Math.round(src.imgWidth * scale));
+      icanvas.height = Math.max(1, Math.round(src.imgHeight * scale));
+      icanvas.getContext('2d').drawImage(src.imageBitmap, 0, 0, icanvas.width, icanvas.height);
+      return Promise.resolve(icanvas);
+    }
+    var doc = src.pdfjsDoc;
     if(!doc) return Promise.resolve(null);
     return doc.getPage(pageIdx + 1).then(function(page){
       var viewport = page.getViewport({ scale: scale });
@@ -579,7 +653,7 @@
       : (pages.length ? 'Click a page to select it.' : 'Open a PDF to begin.');
 
     var hasPages = pages.length > 0;
-    [el.btnExtract, el.btnSave, el.btnClear, el.btnSelectAll, el.btnDiag, el.btnAdd, el.btnMerge]
+    [el.btnExtract, el.btnSave, el.btnShare, el.btnClear, el.btnSelectAll, el.btnDiag, el.btnAdd, el.btnMerge]
       .forEach(function(b){ b.disabled = !hasPages; });
     var hasSel = selected.size > 0;
     [el.btnRotL, el.btnRotR, el.btnDup, el.btnRemove, el.btnReverse].forEach(function(b){ b.disabled = !hasSel && b !== el.btnReverse; });
@@ -648,28 +722,54 @@
   el.btnFind.addEventListener('click', doSearch);
   el.searchInput.addEventListener('keydown', function(e){ if(e.key === 'Enter') doSearch(); });
 
-  // ---------- build output (shared by Save & Verify / Extract) ----------
+  // ---------- build output (shared by Save & Verify / Extract / Share) ----------
   function buildOutputBytes(entries){
     var uniqueSrcIdx = Array.from(new Set(entries.map(function(e){ return e.srcIdx; })));
-    return Promise.all(uniqueSrcIdx.map(function(si){ return PDFLib.PDFDocument.load(sources[si].bytes); }))
+    var pdfSrcIdx = uniqueSrcIdx.filter(function(si){ return sources[si].kind !== 'image'; });
+    var imgSrcIdx = uniqueSrcIdx.filter(function(si){ return sources[si].kind === 'image'; });
+
+    return Promise.all(pdfSrcIdx.map(function(si){ return PDFLib.PDFDocument.load(sources[si].bytes); }))
       .then(function(libDocs){
         var bySrc = {};
-        uniqueSrcIdx.forEach(function(si, k){ bySrc[si] = libDocs[k]; });
+        pdfSrcIdx.forEach(function(si, k){ bySrc[si] = libDocs[k]; });
+
         return PDFLib.PDFDocument.create().then(function(outDoc){
-          var chain = Promise.resolve();
-          entries.forEach(function(entry){
-            chain = chain.then(function(){
-              return outDoc.copyPages(bySrc[entry.srcIdx], [entry.pageIdx]).then(function(copied){
-                var cp = copied[0];
-                if(entry.rotation){
-                  var base = cp.getRotation().angle || 0;
-                  cp.setRotation(PDFLib.degrees((base + entry.rotation) % 360));
+          var embedded = {};
+          // Embed each unique image source once, even if the same source
+          // is duplicated to multiple pages (the Duplicate feature) --
+          // re-embedding per occurrence would waste work and bloat output.
+          var embedChain = imgSrcIdx.reduce(function(chain, si){
+            return chain.then(function(){
+              var src = sources[si];
+              var embed = src.mime === 'image/png' ? outDoc.embedPng(src.bytes) : outDoc.embedJpg(src.bytes);
+              return embed.then(function(img){ embedded[si] = img; });
+            });
+          }, Promise.resolve());
+
+          return embedChain.then(function(){
+            var chain = Promise.resolve();
+            entries.forEach(function(entry){
+              chain = chain.then(function(){
+                var src = sources[entry.srcIdx];
+                if(src.kind === 'image'){
+                  var img = embedded[entry.srcIdx];
+                  var page = outDoc.addPage([img.width, img.height]);
+                  page.drawImage(img, { x:0, y:0, width:img.width, height:img.height });
+                  if(entry.rotation) page.setRotation(PDFLib.degrees(entry.rotation % 360));
+                  return;
                 }
-                outDoc.addPage(cp);
+                return outDoc.copyPages(bySrc[entry.srcIdx], [entry.pageIdx]).then(function(copied){
+                  var cp = copied[0];
+                  if(entry.rotation){
+                    var base = cp.getRotation().angle || 0;
+                    cp.setRotation(PDFLib.degrees((base + entry.rotation) % 360));
+                  }
+                  outDoc.addPage(cp);
+                });
               });
             });
+            return chain.then(function(){ return outDoc.save(); });
           });
-          return chain.then(function(){ return outDoc.save(); });
         });
       });
   }
@@ -687,11 +787,49 @@
     return d.getFullYear() + p(d.getMonth()+1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes());
   }
 
+  // Asks for a file name before Save/Extract/Share. Cancel (returns null
+  // from window.prompt) aborts the whole action -- no download, no state
+  // change. Submitting a blank field is NOT a cancel -- falls back to the
+  // suggested default rather than erroring. Strips only the characters
+  // Windows itself forbids in a filename; spaces/Hindi text stay untouched.
+  function promptFilename(defaultBase){
+    var name = window.prompt('Save as (file name, without extension):', defaultBase);
+    if(name === null) return null;
+    name = name.trim();
+    if(!name) name = defaultBase;
+    return name.replace(/[\\/:*?"<>|]/g, '_');
+  }
+
+  // Ported verbatim from the main app's own js/app.js shareFileOrFallback()
+  // (this tool is self-contained, no shared import) -- tries the native
+  // Web Share sheet first, falls back to a plain download + a pre-filled
+  // WhatsApp Web deep link explaining the file was downloaded.
+  function shareFileOrFallback(blob, fileName, mimeType, shareText){
+    var file = new File([blob], fileName, {type:mimeType});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      return navigator.share({ files:[file], title:'PDF Page Manager', text:shareText }).catch(function(err){
+        if(err && err.name === 'AbortError') return;
+        throw err;
+      });
+    }
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 30000);
+    var msg = shareText + ' — PDF downloaded to your computer. If WhatsApp shows "used in another tab", tap Use Here, then attach the PDF from your Downloads.';
+    window.open('https://wa.me/?text=' + encodeURIComponent(msg), 'pdfPageManagerWhatsAppShare');
+    return Promise.resolve();
+  }
+
   function saveVerify(){
     if(!pages.length) return;
     clearMsg();
+    var defaultBase = 'PDF_Page_Manager_Output_' + dateStamp();
+    var base = promptFilename(defaultBase);
+    if(base === null) return; // cancelled, nothing touched
+    var filename = base + '.pdf';
     el.btnSave.disabled = true;
-    var filename = 'PDF_Page_Manager_Output_' + dateStamp() + '.pdf';
     buildOutputBytes(pages).then(function(bytes){
       // Verification: re-open the just-built bytes and confirm the page
       // count matches and every page is actually readable -- the direct
@@ -723,36 +861,64 @@
   function extractSplit(){
     if(!selected.size){ toast('Select the pages to extract first'); return; }
     clearMsg();
+    var defaultBase = 'Extracted_Pages_' + dateStamp();
+    var base = promptFilename(defaultBase);
+    if(base === null) return; // cancelled, nothing touched
+    var filename = base + '.pdf';
     var idxs = Array.from(selected).sort(function(a,b){ return a-b; });
     var entries = idxs.map(function(i){ return pages[i]; });
     el.btnExtract.disabled = true;
     buildOutputBytes(entries).then(function(bytes){
-      anchorDownload(new Blob([bytes], {type:'application/pdf'}), 'Extracted_Pages_' + dateStamp() + '.pdf');
+      anchorDownload(new Blob([bytes], {type:'application/pdf'}), filename);
       showMsg('ok', '✔ Extracted ' + entries.length + ' page(s) to a new PDF.');
       toast('Extracted');
     }).catch(function(err){
       showMsg('err', 'Extract failed: ' + (err && err.message || err));
     }).finally(function(){ el.btnExtract.disabled = !selected.size; });
   }
+
+  function shareOutput(){
+    if(!pages.length) return;
+    clearMsg();
+    var defaultBase = 'PDF_Page_Manager_Output_' + dateStamp();
+    var base = promptFilename(defaultBase);
+    if(base === null) return; // cancelled, nothing touched
+    var filename = base + '.pdf';
+    el.btnShare.disabled = true;
+    buildOutputBytes(pages).then(function(bytes){
+      return shareFileOrFallback(new Blob([bytes], {type:'application/pdf'}), filename, 'application/pdf',
+        'PDF Page Manager output — ' + pages.length + ' page(s): ' + filename);
+    }).then(function(){
+      toast('Shared / downloaded');
+    }).catch(function(err){
+      showMsg('err', 'Share failed: ' + (err && err.message || err));
+    }).finally(function(){ el.btnShare.disabled = !pages.length; });
+  }
   el.btnSave.addEventListener('click', saveVerify);
   el.btnExtract.addEventListener('click', extractSplit);
+  el.btnShare.addEventListener('click', shareOutput);
 
   // ---------- diagnostics ----------
   function showDiagnostics(){
     if(!pages.length) return;
     Promise.all(pages.map(function(p){
-      var doc = sources[p.srcIdx] && sources[p.srcIdx].pdfjsDoc;
+      var src = sources[p.srcIdx];
+      if(!src) return Promise.resolve(null);
+      if(src.kind === 'image'){
+        return Promise.resolve(src.imgWidth ? { w: src.imgWidth.toFixed(1), h: src.imgHeight.toFixed(1), unit:'px' } : null);
+      }
+      var doc = src.pdfjsDoc;
       if(!doc) return Promise.resolve(null);
       return doc.getPage(p.pageIdx+1).then(function(page){
         var vp = page.getViewport({ scale: 1 });
-        return { w: vp.width.toFixed(1), h: vp.height.toFixed(1) };
+        return { w: vp.width.toFixed(1), h: vp.height.toFixed(1), unit:'pt' };
       }).catch(function(){ return null; });
     })).then(function(sizes){
       var rows = pages.map(function(p, i){
         var src = sources[p.srcIdx];
         var sz = sizes[i];
         return '<tr><td>' + (i+1) + '</td><td>' + (src?src.name:'?') + '</td><td>' + (p.pageIdx+1) + '</td>' +
-          '<td class="num">' + (sz ? (sz.w + ' × ' + sz.h + ' pt') : '—') + '</td>' +
+          '<td class="num">' + (sz ? (sz.w + ' × ' + sz.h + ' ' + sz.unit) : '—') + '</td>' +
           '<td class="num">' + p.rotation + '°</td></tr>';
       }).join('');
       el.diagOverlay.innerHTML =
