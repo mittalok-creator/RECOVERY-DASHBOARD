@@ -130,33 +130,18 @@
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
       <span>SMA Dashboard</span>
     </button>
-    <button class="nav-item" data-view="npadownload" aria-label="Download">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-      <span>Download</span>
-    </button>
     <button class="nav-item" data-view="pnpaslip" aria-label="PNPA Slippage">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg>
       <span>PNPA Slippage</span>
     </button>
-    <!-- Application Form (Alok's request, 2026-09-27): Hindi "OTS
-         Compromise Settlement" borrower application letter, auto-filled
-         from this app's own NPA data (search + read-only summary),
-         Outstanding/Purpose/OTS Amount/Token Amount/Token Date left as
-         manual input, Print/Save-as-PDF/WhatsApp Share on the generated
-         letter. See renderOtsApplicationView() in js/app.js. -->
-    <button class="nav-item" data-view="otsapplication" aria-label="Application Form">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
-      <span>Application Form</span>
-    </button>
-    <!-- NPA Notice (Alok's request, 2026-10-12): branch-wise 15-day recall
-         notice, generated as one combined PDF from this branch's own
-         locked NPA list. Reads the shared Admin-edited template
-         (DATA.noticeTemplates.npa) -- no editor here, branch is always
-         locked. See renderNpaNoticeView() in js/app.js. -->
-    <button class="nav-item" data-view="npanotice" aria-label="NPA Notice">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="m4 7 8 6 8-6"/></svg>
-      <span>NPA Notice</span>
-    </button>
+    <!-- Download, Application Form, and NPA Notice moved into the Utility
+         Hub (Alok's request, 2026-10-13: "mobile main bahut sare tab ho
+         gaye hain" -- too many tabs on the mobile bottom bar). Their view
+         sections/render functions are unchanged; only the entry point
+         moved -- see the "Documents & Letters" category cards in
+         #viewUtility below (onclick="switchView('npadownload'|
+         'otsapplication'|'npanotice')"), same as every other Utility Hub
+         child. -->
     <!-- Recovery Dashboard (branch portal): no OTS Calculator at all --
          "Search & Settlement" removed from the nav same way "Daily PNPA"
          above it already was, not deleted from the DOM (its view section
@@ -342,6 +327,10 @@
     </section>
 
     <section class="view" data-view="npadownload" id="viewNpaDownload">
+      <button type="button" class="page-back-link" onclick="switchView('utility')" aria-label="Back to Utility Hub">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M15 18l-6-6 6-6"/></svg>
+        <span>Utility Hub</span>
+      </button>
       <div class="view-head">
         <div>
           <h1 class="view-title">Download</h1>
@@ -362,6 +351,10 @@
     </section>
 
     <section class="view" data-view="otsapplication" id="viewOtsApplication">
+      <button type="button" class="page-back-link" onclick="switchView('utility')" aria-label="Back to Utility Hub">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M15 18l-6-6 6-6"/></svg>
+        <span>Utility Hub</span>
+      </button>
       <div class="view-head">
         <div>
           <h1 class="view-title">Application Form</h1>
@@ -372,6 +365,10 @@
     </section>
 
     <section class="view" data-view="npanotice" id="viewNpaNotice">
+      <button type="button" class="page-back-link" onclick="switchView('utility')" aria-label="Back to Utility Hub">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M15 18l-6-6 6-6"/></svg>
+        <span>Utility Hub</span>
+      </button>
       <div class="view-head">
         <div>
           <h1 class="view-title">NPA Notice</h1>
@@ -463,7 +460,7 @@
               <span class="onedrive-page-sub">Every extra tool, kept in one place — grouped so the right one is never far</span>
             </div>
           </div>
-          <span class="utility-hub-count">2 TOOLS</span>
+          <span class="utility-hub-count">5 TOOLS</span>
         </header>
         <label class="utility-search-pill">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -482,13 +479,40 @@
             </div>
           </div>
           <div class="utility-category" data-category="documents">
-            <div class="utility-category-heading utility-cat-coral"><span>Documents &amp; Letters</span><i></i><b>1 tool</b></div>
+            <div class="utility-category-heading utility-cat-coral"><span>Documents &amp; Letters</span><i></i><b>4 tools</b></div>
             <div class="utility-category-cards">
               <button type="button" class="utility-card tool-slate" onclick="switchView('pdfpagemanager')">
                 <span class="utility-card-arrow"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
                 <span class="utility-card-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 16h6M9 10h3"/></svg></span>
                 <span class="utility-card-title">PDF Page Manager</span>
                 <span class="utility-card-desc">Reorder, rotate, merge, extract and split PDF pages — entirely in your browser, nothing uploaded</span>
+              </button>
+              <!-- Moved here from a top-level nav tab (Alok's request,
+                   2026-10-13: too many tabs on the mobile bottom bar).
+                   Same renderOtsApplicationView() in js/app.js, unchanged. -->
+              <button type="button" class="utility-card tool-violet" onclick="switchView('otsapplication')">
+                <span class="utility-card-arrow"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+                <span class="utility-card-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg></span>
+                <span class="utility-card-title">Application Form</span>
+                <span class="utility-card-desc">Settlement application letter — search an account, fill in the details, print or share</span>
+              </button>
+              <!-- Moved here from a top-level nav tab (Alok's request,
+                   2026-10-13). Same renderNpaNoticeView() in js/app.js,
+                   unchanged. -->
+              <button type="button" class="utility-card tool-rose" onclick="switchView('npanotice')">
+                <span class="utility-card-arrow"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+                <span class="utility-card-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="m4 7 8 6 8-6"/></svg></span>
+                <span class="utility-card-title">NPA Notice</span>
+                <span class="utility-card-desc">Branch-wise 15-day recall notice for your own accounts, one combined PDF</span>
+              </button>
+              <!-- Moved here from a top-level nav tab (Alok's request,
+                   2026-10-13). Same renderNpaDownloadView() in js/app.js,
+                   unchanged. -->
+              <button type="button" class="utility-card tool-indigo" onclick="switchView('npadownload')">
+                <span class="utility-card-arrow"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+                <span class="utility-card-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
+                <span class="utility-card-title">Download</span>
+                <span class="utility-card-desc">NPA/KCC Overdue/PNPA data as formatted Excel exports, for your own branch</span>
               </button>
             </div>
           </div>
@@ -820,22 +844,12 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
       <span>SMA</span>
     </button>
-    <button class="nav-item" data-view="npadownload" aria-label="Download">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-      <span>Download</span>
-    </button>
     <button class="nav-item" data-view="pnpaslip" aria-label="PNPA Slippage">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg>
       <span>Slippage</span>
     </button>
-    <button class="nav-item" data-view="otsapplication" aria-label="Application Form">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
-      <span>Form</span>
-    </button>
-    <button class="nav-item" data-view="npanotice" aria-label="NPA Notice">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="m4 7 8 6 8-6"/></svg>
-      <span>Notice</span>
-    </button>
+    <!-- Download, Application Form, NPA Notice moved into the Utility Hub,
+         see the matching comment on the desktop nav rail above. -->
     <!-- Recovery Dashboard (branch portal): no OTS Calculator, see the
          matching comment on the desktop nav rail above. -->
     <!--
@@ -1388,7 +1402,7 @@
      place their version query strings now live. -->
 <script src="js/login.js?v=20261007a"></script>
 <script id="ots-data" type="application/json">{}</script>
-<script src="js/app.js?v=20261012b"></script>
+<script src="js/app.js?v=20261013a"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
