@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Financial Calculators</title>
+<title>CalcIndia</title>
 <script>
 (function(){
   function syncTheme(){
@@ -58,14 +58,34 @@
   .wrap{max-width:1180px;margin:0 auto;padding:16px 18px 40px}
   h2.sec{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted);margin:0 0 10px;font-weight:700}
 
-  /* ---------- calculator tab bar ---------- */
-  .calc-tab-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
-  .calc-tab-btn{border:1px solid var(--line);background:var(--surface);color:var(--ink-muted);
-    border-radius:10px;padding:10px 16px;font-size:13px;font-weight:600;cursor:pointer;
-    display:flex;align-items:center;gap:7px;transition:background .12s,color .12s,border-color .12s}
-  .calc-tab-btn:hover{background:var(--surface-muted)}
-  .calc-tab-btn.active{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-  .calc-tab-btn svg{width:15px;height:15px;flex:none}
+  /* ---------- CalcIndia directory (search / category pills / cards) ---------- */
+  .calcindia-head{margin-bottom:16px}
+  .calcindia-head h1{font-size:19px;font-weight:800;margin:0 0 4px;letter-spacing:-.2px;font-family:'Spectral',Georgia,serif}
+  .calcindia-head p{margin:0;font-size:12.6px;color:var(--ink-muted)}
+  .calc-search-row{display:flex;gap:8px;margin-bottom:12px}
+  .calc-search-row input{flex:1;border:1px solid var(--line);background:var(--surface);color:var(--ink);
+    border-radius:10px;padding:10px 14px;font-size:13.5px;font-family:'IBM Plex Sans',sans-serif}
+  .calc-cat-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px}
+  .calc-cat-pill{border:1px solid var(--line);background:var(--surface);color:var(--ink-muted);
+    border-radius:999px;padding:7px 14px;font-size:12.2px;font-weight:600;cursor:pointer;
+    transition:background .12s,color .12s,border-color .12s}
+  .calc-cat-pill:hover{background:var(--surface-muted)}
+  .calc-cat-pill.active{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .calc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-bottom:20px}
+  .calc-card{position:relative;text-align:left;border:1px solid var(--line);background:var(--surface);
+    border-radius:12px;padding:14px;cursor:pointer;transition:transform .12s,box-shadow .12s;display:flex;flex-direction:column;gap:6px}
+  .calc-card:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+  .calc-card svg{width:22px;height:22px;color:var(--accent);flex:none}
+  .calc-card .calc-card-title{font-size:13.6px;font-weight:700}
+  .calc-card .calc-card-cat{font-size:10.8px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+  .calc-fav-btn{position:absolute;top:10px;right:10px;border:none;background:none;cursor:pointer;
+    font-size:17px;line-height:1;color:var(--line);padding:2px}
+  .calc-fav-btn.active{color:#D9A528}
+  .calc-empty-state{font-size:12.8px;color:var(--ink-muted);padding:20px 4px}
+  .calc-back-link{display:inline-flex;align-items:center;gap:6px;border:none;background:none;color:var(--accent);
+    font-size:13px;font-weight:600;cursor:pointer;padding:0;margin-bottom:14px}
+  .calc-back-link svg{width:14px;height:14px}
+  #calcDirectoryScreen.hidden,#calcDetailScreen.hidden{display:none}
   .calc-panel{display:none}
   .calc-panel.active{display:block}
 
@@ -125,28 +145,24 @@
 <body>
 <div class="wrap">
 
-  <div class="calc-tab-row" id="calcTabRow">
-    <button type="button" class="calc-tab-btn active" data-calc="emi">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20"/></svg>
-      Loan EMI
-    </button>
-    <button type="button" class="calc-tab-btn" data-calc="fd">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 7v10M16 7v10M3 12h18"/></svg>
-      Fixed Deposit
-    </button>
-    <button type="button" class="calc-tab-btn" data-calc="rd">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 2v6m0 0 3-3m-3 3-3-3"/><rect x="4" y="10" width="16" height="11" rx="2"/></svg>
-      Recurring Deposit
-    </button>
-    <button type="button" class="calc-tab-btn" data-calc="sip">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 17l5-6 4 3 6-8"/><path d="M3 21h18"/></svg>
-      Mutual Fund (SIP)
-    </button>
-    <button type="button" class="calc-tab-btn" data-calc="nps">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
-      NPS
-    </button>
+  <div id="calcDirectoryScreen">
+    <div class="calcindia-head">
+      <h1>CalcIndia</h1>
+      <p>Every financial calculator in one place — search, favourite, and pick up where you left off.</p>
+    </div>
+    <div class="calc-search-row">
+      <input type="text" id="calcSearchInput" placeholder="Search calculators — try “EMI”, “pension”, “deposit”…">
+    </div>
+    <div class="calc-cat-row" id="calcCatRow"></div>
+    <div class="calc-grid" id="calcGrid"></div>
+    <p class="calc-empty-state" id="calcEmptyState" hidden></p>
   </div>
+
+  <div id="calcDetailScreen" class="hidden">
+    <button type="button" class="calc-back-link" id="calcBackLink">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M15 18l-6-6 6-6"/></svg>
+      All Calculators
+    </button>
 
   <!-- ================= LOAN EMI ================= -->
   <div class="calc-panel active" data-calc="emi">
@@ -448,6 +464,8 @@
         </details>
       </div>
     </div>
+  </div>
+
   </div>
 
 </div>
@@ -887,21 +905,183 @@
   })();
 
   // =====================================================================
-  // Tab switcher
+  // CalcIndia directory -- registry metadata, search, category pills,
+  // favourites and recent-calculations, all per-device via localStorage
+  // (a convenience, never treated as authoritative/synced state -- same
+  // established convention as every other localStorage use in this app).
+  // Each registered calculator's own math/ids/Print/Excel logic above is
+  // completely unchanged; this layer only controls which .calc-panel is
+  // shown and tracks favourites/recents around that existing mechanism.
   // =====================================================================
+  var CATEGORIES = [
+    { id:'all', label:'All' },
+    { id:'favourites', label:'★ Favourites' },
+    { id:'recent', label:'Recent' },
+    { id:'loans', label:'Loans' },
+    { id:'deposits', label:'Deposits' },
+    { id:'investments', label:'Investments' },
+    { id:'tax', label:'Tax & Salary' },
+    { id:'personal', label:'Personal Finance' },
+    { id:'currency', label:'Currency' },
+    { id:'everyday', label:'Everyday' },
+  ];
+  var CALCULATORS = [
+    { id:'emi', category:'loans', label:'Loan EMI', desc:'Reducing-balance or flat-rate EMI, full amortization schedule',
+      keywords:'loan emi reducing flat amortization interest',
+      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20"/></svg>' },
+    { id:'fd', category:'deposits', label:'Fixed Deposit', desc:'Maturity value with monthly/quarterly/half-yearly/yearly compounding',
+      keywords:'fd fixed deposit maturity bank',
+      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 7v10M16 7v10M3 12h18"/></svg>' },
+    { id:'rd', category:'deposits', label:'Recurring Deposit', desc:'Standard bank RD formula — quarterly compounding on monthly deposits',
+      keywords:'rd recurring deposit monthly bank',
+      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 2v6m0 0 3-3m-3 3-3-3"/><rect x="4" y="10" width="16" height="11" rx="2"/></svg>' },
+    { id:'sip', category:'investments', label:'Mutual Fund (SIP/Lumpsum)', desc:'SIP or lumpsum future value, with a year-wise growth table',
+      keywords:'sip mutual fund lumpsum investment returns',
+      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 17l5-6 4 3 6-8"/><path d="M3 21h18"/></svg>' },
+    { id:'nps', category:'investments', label:'NPS', desc:'National Pension System — corpus, lumpsum, annuity and pension estimate',
+      keywords:'nps pension national pension system retirement annuity',
+      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>' },
+  ];
+
+  var FAV_KEY = 'calcindia-favourites';
+  var RECENT_KEY = 'calcindia-recent';
+  function getFavourites(){
+    try{ return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); }catch(e){ return []; }
+  }
+  function toggleFavourite(id){
+    var favs = getFavourites();
+    var idx = favs.indexOf(id);
+    if(idx>=0) favs.splice(idx,1); else favs.push(id);
+    try{ localStorage.setItem(FAV_KEY, JSON.stringify(favs)); }catch(e){}
+  }
+  function getRecents(){
+    try{ return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); }catch(e){ return []; }
+  }
+  function logRecent(id){
+    var recents = getRecents().filter(function(r){ return r.id !== id; });
+    recents.unshift({ id:id, ts:Date.now() });
+    recents = recents.slice(0, 10);
+    try{ localStorage.setItem(RECENT_KEY, JSON.stringify(recents)); }catch(e){}
+  }
+
   var activeCalc = 'emi';
-  var tabRow = document.getElementById('calcTabRow');
-  tabRow.addEventListener('click', function(e){
-    var btn = e.target.closest('.calc-tab-btn');
+  var activeCategory = 'all';
+  var searchQuery = '';
+
+  function matchesQuery(calc, q){
+    if(!q) return true;
+    var hay = (calc.label + ' ' + calc.desc + ' ' + calc.keywords).toLowerCase();
+    return hay.indexOf(q.toLowerCase()) !== -1;
+  }
+  function filteredCalculators(){
+    var favs = getFavourites();
+    var recentIds = getRecents().map(function(r){ return r.id; });
+    return CALCULATORS.filter(function(calc){
+      if(!matchesQuery(calc, searchQuery)) return false;
+      if(activeCategory === 'favourites') return favs.indexOf(calc.id) >= 0;
+      if(activeCategory === 'recent') return recentIds.indexOf(calc.id) >= 0;
+      if(activeCategory === 'all') return true;
+      return calc.category === activeCategory;
+    });
+  }
+
+  var el = {
+    catRow: document.getElementById('calcCatRow'),
+    grid: document.getElementById('calcGrid'),
+    emptyState: document.getElementById('calcEmptyState'),
+    searchInput: document.getElementById('calcSearchInput'),
+    directoryScreen: document.getElementById('calcDirectoryScreen'),
+    detailScreen: document.getElementById('calcDetailScreen'),
+    backLink: document.getElementById('calcBackLink'),
+  };
+
+  function renderCategoryRow(){
+    el.catRow.innerHTML = CATEGORIES.map(function(cat){
+      return '<button type="button" class="calc-cat-pill' + (cat.id===activeCategory?' active':'') + '" data-cat="' + cat.id + '">' + cat.label + '</button>';
+    }).join('');
+  }
+  function renderGrid(){
+    var favs = getFavourites();
+    var list = filteredCalculators();
+    el.grid.innerHTML = list.map(function(calc){
+      var isFav = favs.indexOf(calc.id) >= 0;
+      // A <div role="button"> here, not a real <button> -- the favourite
+      // star below is a real nested <button>, and HTML forbids nesting
+      // interactive controls inside a <button> (the parser auto-closes
+      // the outer button at the first nested one, silently mangling the
+      // rest of the card's markup into sibling content instead of
+      // children). tabindex+keydown below keep it keyboard-activatable.
+      return '<div class="calc-card" data-id="' + calc.id + '" role="button" tabindex="0">'
+        + '<button type="button" class="calc-fav-btn' + (isFav?' active':'') + '" data-fav="' + calc.id + '" aria-label="Toggle favourite">' + (isFav ? '★' : '☆') + '</button>'
+        + calc.icon
+        + '<span class="calc-card-title">' + calc.label + '</span>'
+        + '<span class="calc-card-cat">' + (CATEGORIES.filter(function(c){return c.id===calc.category;})[0]||{}).label + '</span>'
+        + '</div>';
+    }).join('');
+    if(!list.length){
+      el.emptyState.hidden = false;
+      var categoryHasAnyCalculators = CALCULATORS.some(function(c){ return c.category === activeCategory; });
+      el.emptyState.textContent = searchQuery ? 'No calculators match "' + searchQuery + '".'
+        : (activeCategory==='favourites') ? 'No favourites yet — tap the star on a calculator to add it here.'
+        : (activeCategory==='recent') ? 'No recent calculations yet.'
+        : (activeCategory!=='all' && !categoryHasAnyCalculators) ? 'More calculators coming soon in this category.'
+        : 'No calculators found.';
+    } else {
+      el.emptyState.hidden = true;
+    }
+  }
+  function renderDirectory(){
+    renderCategoryRow();
+    renderGrid();
+  }
+
+  el.searchInput.addEventListener('input', function(){ searchQuery = el.searchInput.value; renderGrid(); });
+  el.catRow.addEventListener('click', function(e){
+    var btn = e.target.closest('.calc-cat-pill');
     if(!btn) return;
-    activeCalc = btn.dataset.calc;
-    Array.prototype.forEach.call(tabRow.querySelectorAll('.calc-tab-btn'), function(b){ b.classList.toggle('active', b===btn); });
-    Array.prototype.forEach.call(document.querySelectorAll('.calc-panel'), function(p){ p.classList.toggle('active', p.dataset.calc===activeCalc); });
-    if(window.__calcRenderers[activeCalc]) window.__calcRenderers[activeCalc]();
+    activeCategory = btn.dataset.cat;
+    renderDirectory();
+  });
+  el.grid.addEventListener('click', function(e){
+    var favBtn = e.target.closest('.calc-fav-btn');
+    if(favBtn){
+      toggleFavourite(favBtn.dataset.fav);
+      renderGrid();
+      return;
+    }
+    var card = e.target.closest('.calc-card');
+    if(card) showCalculator(card.dataset.id);
+  });
+  // .calc-card is a div[role=button], not a real <button> (see the
+  // comment in renderGrid() for why) -- keydown gives it the same
+  // Enter/Space activation a real button would have for free.
+  el.grid.addEventListener('keydown', function(e){
+    if(e.key !== 'Enter' && e.key !== ' ') return;
+    var card = e.target.closest('.calc-card');
+    if(!card) return;
+    e.preventDefault();
+    showCalculator(card.dataset.id);
   });
 
+  function showCalculator(id){
+    activeCalc = id;
+    logRecent(id);
+    Array.prototype.forEach.call(document.querySelectorAll('.calc-panel'), function(p){ p.classList.toggle('active', p.dataset.calc===activeCalc); });
+    el.directoryScreen.classList.add('hidden');
+    el.detailScreen.classList.remove('hidden');
+    if(window.__calcRenderers[activeCalc]) window.__calcRenderers[activeCalc]();
+  }
+  function showDirectory(){
+    el.detailScreen.classList.add('hidden');
+    el.directoryScreen.classList.remove('hidden');
+    renderDirectory();
+  }
+  el.backLink.addEventListener('click', showDirectory);
+
+  renderDirectory();
+
   // =====================================================================
-  // Print (per active tab, A4 landscape, reusing the sched table already on screen)
+  // Print (per active calculator, A4 landscape, reusing the sched table already on screen)
   // =====================================================================
   function printLabelFor(calc){
     return { emi:'Loan EMI Calculator', fd:'Fixed Deposit Calculator', rd:'Recurring Deposit Calculator',
