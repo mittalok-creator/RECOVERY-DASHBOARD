@@ -215,6 +215,10 @@
   /* PDF Page Manager (2026-10-12) -- a cool grey-blue, distinct from every
      warm/jewel-tone hue above, a good fit for a plain file-management tool. */
   --tool-slate:#5B7290; --tool-slate-soft:rgba(91,114,144,.16);
+  /* Universal Letter Generator + EMI/Loan Calculator (2026-10-13) -- two
+     new hues since every existing one is already assigned to a tile. */
+  --tool-amber:#D98C2B; --tool-amber-soft:rgba(217,140,43,.16);
+  --tool-mint:#2BB88A; --tool-mint-soft:rgba(43,184,138,.16);
   --emboss-rim:rgba(255,255,255,.05);
   --gold:#3A7BFF; --gold-l:#7FB0FF; --gold-d:#245BFF; --gold-soft:rgba(58,123,255,.12);
 
@@ -1920,6 +1924,7 @@ html,body{overscroll-behavior:none}
 .utility-cat-teal{color:var(--tool-teal)}
 .utility-cat-indigo{color:var(--tool-indigo)}
 .utility-cat-coral{color:var(--tool-coral)}
+.utility-cat-mint{color:var(--tool-mint)}
 .utility-category-cards{display:flex;flex-wrap:wrap;gap:18px;margin-top:18px}
 .utility-card{all:unset;position:relative;display:flex;flex-direction:column;gap:14px;text-align:left;
   box-sizing:border-box;width:296px;padding:24px 22px 22px;cursor:pointer;
@@ -1939,6 +1944,8 @@ html,body{overscroll-behavior:none}
 .utility-card.tool-jade{--tool-color:var(--tool-jade);--tool-soft:var(--tool-jade-soft)}
 .utility-card.tool-coral{--tool-color:var(--tool-coral);--tool-soft:var(--tool-coral-soft)}
 .utility-card.tool-slate{--tool-color:var(--tool-slate);--tool-soft:var(--tool-slate-soft)}
+.utility-card.tool-amber{--tool-color:var(--tool-amber);--tool-soft:var(--tool-amber-soft)}
+.utility-card.tool-mint{--tool-color:var(--tool-mint);--tool-soft:var(--tool-mint-soft)}
 .utility-card-icon{position:relative;display:flex;align-items:center;justify-content:center;width:52px;height:52px;flex-shrink:0;
   border-radius:50%;color:#fff;
   background:radial-gradient(circle at 32% 28%, color-mix(in srgb, var(--tool-color, var(--accent-2)) 55%, white), var(--tool-color, var(--accent-2)) 78%);
@@ -2635,6 +2642,8 @@ header.app-head::before,.detail-head::before{
   --tool-jade:#1F8F58; --tool-jade-soft:rgba(31,143,88,.10);
   --tool-coral:#B33F2C; --tool-coral-soft:rgba(179,63,44,.10);
   --tool-slate:#7E93AC; --tool-slate-soft:rgba(126,147,172,.14);
+  --tool-amber:#9C6416; --tool-amber-soft:rgba(156,100,22,.10);
+  --tool-mint:#1C7A5C; --tool-mint-soft:rgba(28,122,92,.10);
   --emboss-rim:rgba(255,255,255,.75);
   --gold:#1B4FE0; --gold-l:#3A7BFF; --gold-d:#123A9E; --gold-soft:rgba(27,79,224,.08);
   --stripe:rgba(62,50,30,.024); --stripe-label:rgba(62,50,30,.035);
@@ -3401,6 +3410,12 @@ table.bifurcation-table{border-collapse:collapse;width:100%;font-size:12px;backg
    documented above for every other self-resizing tool iframe. */
 #viewPdfPageManager .tool-frame-wrap{height:auto;min-height:0;border-radius:0;border:none;background:transparent}
 #viewPdfPageManager .tool-frame{height:720px;min-height:0}
+/* Universal Letter Generator + EMI Calculator (2026-10-13) -- same
+   missing-override bug class already documented above. */
+#viewLetterAutomation .tool-frame-wrap{height:auto;min-height:0;border-radius:0;border:none;background:transparent}
+#viewLetterAutomation .tool-frame{height:900px;min-height:0}
+#viewEmiCalculator .tool-frame-wrap{height:auto;min-height:0;border-radius:0;border:none;background:transparent}
+#viewEmiCalculator .tool-frame{height:900px;min-height:0}
 .onedrive-page-head{display:flex;flex-direction:column;gap:4px}
 .onedrive-page-title{display:flex;align-items:center;gap:10px;color:var(--ink)}
 .onedrive-page-title svg{color:var(--accent);flex-shrink:0}

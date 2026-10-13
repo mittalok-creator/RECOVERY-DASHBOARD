@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Universal Letter Generator</title>
+<!-- Synced with the main app's own theme toggle (same technique as every
+     other Utility tool): embedded via iframe on the same origin as the
+     main app, so it can read the exact localStorage key the main app's
+     own theme toggle writes (see setTheme() in js/app.js) directly, no
+     postMessage needed. -->
+<script>
+(function(){
+  function syncTheme(){
+    try{
+      var t = localStorage.getItem('upgb-theme');
+      if(t==='dark'||t==='light') document.documentElement.dataset.theme = t;
+      else delete document.documentElement.dataset.theme;
+    }catch(e){}
+  }
+  syncTheme();
+  window.addEventListener('storage', function(e){ if(e.key==='upgb-theme') syncTheme(); });
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<!-- Self-hosted, not CDN-linked, matching every other tool in this app.
+     xlsx.full.min.js reads the uploaded workbook; html2canvas + jspdf
+     render each filled letter into one combined PDF -- same pipeline the
+     main app's own NPA Notice feature already uses (js/app.js), ported
+     here since this iframe runs in its own script context and cannot
+     call anything in js/app.js directly. -->
+<script src="../js/vendor/xlsx.full.min.js"></script>
+<script src="../js/vendor/html2canvas.min.js"></script>
+<script src="../js/vendor/jspdf.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#FBF8F2; --surface:#FFFFFF; --surface-muted:#FBF3E6;
+    --ink:#3A2E1F; --ink-muted:#8A7A62; --line:#E8DCC4;
+    --accent:#B5781E; --accent-ink:#FFFFFF; --accent-soft:#F6E6C8;
+    --warn:#A15C00; --warn-soft:#FBE8CE; --danger:#B42318; --danger-soft:#FBE4E1;
+    --good:#18794E; --good-soft:#DFF3E7;
+    --shadow: 0 1px 2px rgba(58,46,31,.08), 0 6px 20px -8px rgba(58,46,31,.16);
+    --shadow-lg: 0 10px 28px rgba(58,46,31,.20);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#17130D; --surface:#211B12; --surface-muted:#2A2217;
+      --ink:#F2E9D8; --ink-muted:#B2A182; --line:#3C3220;
+      --accent:#E0A94A; --accent-ink:#1A1206; --accent-soft:#3A2D16;
+      --warn:#E0A94A; --warn-soft:#3A2D16; --danger:#F0796E; --danger-soft:#3A1E1C;
+      --good:#5DCB94; --good-soft:#163424;
+      --shadow: 0 1px 2px rgba(0,0,0,.4); --shadow-lg: 0 14px 34px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#17130D; --surface:#211B12; --surface-muted:#2A2217;
+    --ink:#F2E9D8; --ink-muted:#B2A182; --line:#3C3220;
+    --accent:#E0A94A; --accent-ink:#1A1206; --accent-soft:#3A2D16;
+    --warn:#E0A94A; --warn-soft:#3A2D16; --danger:#F0796E; --danger-soft:#3A1E1C;
+    --good:#5DCB94; --good-soft:#163424;
+    --shadow: 0 1px 2px rgba(0,0,0,.4); --shadow-lg: 0 14px 34px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);overflow-x:hidden}
+  body{color:var(--ink);font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;font-size:14px;line-height:1.5}
+  .wrap{max-width:1180px;margin:0 auto;padding:16px 18px 40px}
+  h2.sec{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted);margin:0 0 10px;font-weight:700}
+
+  .msg{border-radius:10px;padding:10px 14px;font-size:12.5px;margin-bottom:12px;display:none}
+  .msg.show{display:block}
+  .msg.err{background:var(--danger-soft);color:var(--danger)}
+  .msg.ok{background:var(--good-soft);color:var(--good)}
+  .msg.info{background:var(--accent-soft);color:#6B4300}
+  :root[data-theme="dark"] .msg.info, :root:not([data-theme="light"]) .msg.info{color:var(--accent)}
+
+  .dropzone{border:2px dashed var(--line);border-radius:14px;background:var(--surface);padding:28px 18px;text-align:center;margin-bottom:16px;cursor:pointer;transition:border-color .15s,background .15s}
+  .dropzone:hover,.dropzone.drag{border-color:var(--accent);background:var(--accent-soft)}
+  .dropzone svg{width:28px;height:28px;color:var(--accent);margin-bottom:8px}
+  .dropzone b{display:block;font-size:14px;margin-bottom:3px}
+  .dropzone span{font-size:12px;color:var(--ink-muted)}
+  input[type=file]{display:none}
+
+  .panel{min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:16px;margin-bottom:16px}
+
+  .chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .chip{border:1px solid var(--line);background:var(--surface-muted);color:var(--accent);font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;padding:5px 9px;border-radius:7px;cursor:pointer}
+  .chip:hover{background:var(--accent-soft)}
+  .chip-hint{font-size:11.5px;color:var(--ink-muted);margin-bottom:8px}
+
+  textarea#templateText{width:100%;min-height:260px;border:1px solid var(--line);background:var(--surface-muted);color:var(--ink);border-radius:10px;padding:12px;font-family:'IBM Plex Mono',monospace;font-size:12.6px;line-height:1.7;resize:vertical}
+  .markup-help{font-size:11px;color:var(--ink-muted);margin-top:8px;line-height:1.7}
+  .markup-help code{background:var(--surface-muted);padding:1px 5px;border-radius:4px;font-family:'IBM Plex Mono',monospace}
+
+  .row-flex{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0}
+  label.chk{display:flex;align-items:center;gap:7px;font-size:12.8px;cursor:pointer}
+  label.chk input{width:16px;height:16px}
+
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+  .tbgroup{display:flex;flex-wrap:wrap;gap:4px;max-width:100%;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:5px;box-shadow:var(--shadow)}
+  .tbtn{border:none;background:transparent;color:var(--ink);font-size:12.6px;font-family:'IBM Plex Sans',sans-serif;font-weight:500;padding:8px 12px;border-radius:7px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+  .tbtn:hover{background:var(--surface-muted)}
+  .tbtn:disabled{opacity:.4;cursor:default}
+  .tbtn.primary{background:var(--accent);color:var(--accent-ink);font-weight:600}
+  .tbtn.primary:hover{filter:brightness(1.08)}
+  .tbtn.ghost{border:1px solid var(--line)}
+
+  .preview-stage{background:var(--surface-muted);border-radius:10px;padding:14px;overflow:auto;max-height:640px}
+  .preview-stage > div{margin:0 auto}
+
+  @media (max-width:600px){ .toolbar{gap:8px} .tbgroup{flex:1 1 auto;justify-content:center} .tbtn{padding:7px 9px;font-size:11.8px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div id="msgBox" class="msg"></div>
+
+  <div class="panel">
+    <h2 class="sec">1. Upload your data (Excel or CSV)</h2>
+    <div id="dropzone" class="dropzone">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 3v5h5"/><path d="M12 11v6M9 14l3-3 3 3"/></svg>
+      <b>Open an Excel or CSV file</b>
+      <span>First row = column headers. Click to browse, or drag &amp; drop — nothing is uploaded anywhere, everything stays in this browser tab</span>
+    </div>
+    <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+    <div id="fileStatus" class="chip-hint"></div>
+  </div>
+
+  <div class="panel" id="tokenPanel" style="display:none">
+    <h2 class="sec">2. Insert a field into your letter</h2>
+    <div class="chip-hint">Click a field below to insert it at the cursor in your template.</div>
+    <div class="chip-row" id="chipRow"></div>
+  </div>
+
+  <div class="panel">
+    <h2 class="sec">3. Write your letter template</h2>
+    <textarea id="templateText" placeholder="Dear {{Name}},&#10;&#10;This is to inform you that...&#10;&#10;**Bold text**, __underlined text__, ==highlighted text==.&#10;<<Centered line>>&#10;>>Right-aligned line&#10;▶ A bullet point&#10;---&#10;@@Left side@@Right side"></textarea>
+    <div class="markup-help">
+      Markup: <code>**bold**</code> &middot; <code>__underline__</code> &middot; <code>==highlight==</code> &middot; <code>&lt;&lt;centered line&gt;&gt;</code> &middot; <code>&gt;&gt;right-aligned line</code> &middot; <code>▶ bullet</code> &middot; <code>• small bullet</code> &middot; <code>---</code> (divider) &middot; <code>left@@right</code> (split line)
+    </div>
+    <div class="row-flex">
+      <label class="chk"><input type="checkbox" id="letterheadChk" checked> Include bank letterhead</label>
+      <button type="button" class="tbtn ghost" id="btnResetTemplate">Reset template</button>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="tbgroup">
+      <button type="button" class="tbtn primary" id="btnGenerate" disabled>📄 Generate combined PDF</button>
+      <button type="button" class="tbtn ghost" id="btnPrint" disabled>🖨 Print</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2 class="sec">Live preview — first row</h2>
+    <div class="preview-stage" id="previewStage"><div id="previewHost" style="color:var(--ink-muted);font-size:13px">Upload a file to see a preview.</div></div>
+  </div>
+
+</div>
+
+<div id="printArea" style="position:fixed;left:-9999px;top:0;width:800px"></div>
+
+<script>
+(function(){
+  'use strict';
+  var el = {};
+  ['msgBox','dropzone','fileInput','fileStatus','tokenPanel','chipRow','templateText',
+   'letterheadChk','btnResetTemplate','btnGenerate','btnPrint','previewStage','previewHost'
+  ].forEach(function(id){ el[id] = document.getElementById(id); });
+
+  var TPL_KEY = 'upgb-letter-generator-template';
+  var LH_KEY = 'upgb-letter-generator-letterhead';
+  var DEFAULT_TEMPLATE = 'Dear {{Name}},\n\n<<Subject: >>\n\nThis is to bring to your notice that...\n\n**Please note** the above carefully and respond at your earliest.\n\n---\n@@Date: {{Today}}@@Branch: \n\nThank you.';
+
+  var header = [];       // normalized token names, in column order
+  var headerRaw = [];    // original header text, same order
+  var rows = [];         // array of row-objects keyed by token name -> value
+  var fileLoaded = false;
+
+  // ---------- small ported helpers (self-contained tool, no shared imports) ----------
+  function esc(s){ return (s===null||s===undefined)?'':String(s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+  function parseCSV(text){
+    var allRows = [], row = [], field = '', inQuotes = false;
+    for(var i=0;i<text.length;i++){
+      var c = text[i];
+      if(inQuotes){
+        if(c === '"'){ if(text[i+1] === '"'){ field+='"'; i++; } else inQuotes = false; }
+        else field += c;
+      } else {
+        if(c === '"') inQuotes = true;
+        else if(c === ','){ row.push(field); field=''; }
+        else if(c === '\n'){ row.push(field); allRows.push(row); row=[]; field=''; }
+        else if(c === '\r'){ /* skip */ }
+        else field += c;
+      }
+    }
+    if(field!=='' || row.length){ row.push(field); allRows.push(row); }
+    return allRows;
+  }
+
+  function tokenNameFromHeader(h, usedSet){
+    var base = String(h||'').trim().replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+    if(!base) base = 'Field';
+    var name = base, n = 2;
+    while(usedSet.has(name)){ name = base + '_' + n; n++; }
+    usedSet.add(name);
+    return name;
+  }
+
+  function showMsg(kind, text){
+    el.msgBox.className = 'msg show ' + kind;
+    el.msgBox.textContent = text;
+  }
+  function clearMsg(){ el.msgBox.className = 'msg'; el.msgBox.textContent = ''; }
+
+  // ---------- template persistence (per-device convenience only) ----------
+  function loadTemplate(){
+    try{
+      var t = localStorage.getItem(TPL_KEY);
+      el.templateText.value = (t !== null) ? t : DEFAULT_TEMPLATE;
+      var lh = localStorage.getItem(LH_KEY);
+      el.letterheadChk.checked = (lh === null) ? true : lh === '1';
+    }catch(e){ el.templateText.value = DEFAULT_TEMPLATE; }
+  }
+  function saveTemplate(){
+    try{
+      localStorage.setItem(TPL_KEY, el.templateText.value);
+      localStorage.setItem(LH_KEY, el.letterheadChk.checked ? '1' : '0');
+    }catch(e){}
+  }
+  el.templateText.addEventListener('input', function(){ saveTemplate(); renderPreview(); });
+  el.letterheadChk.addEventListener('change', function(){ saveTemplate(); renderPreview(); });
+  el.btnResetTemplate.addEventListener('click', function(){
+    if(!confirm('Reset the template back to the starting example? This cannot be undone.')) return;
+    el.templateText.value = DEFAULT_TEMPLATE;
+    el.letterheadChk.checked = true;
+    saveTemplate();
+    renderPreview();
+  });
+  loadTemplate();
+
+  // ---------- {{Token}} insertion at cursor ----------
+  function insertAtCursor(text){
+    var ta = el.templateText;
+    var startPos = ta.selectionStart, endPos = ta.selectionEnd;
+    var before = ta.value.slice(0, startPos), after = ta.value.slice(endPos);
+    ta.value = before + text + after;
+    var pos = startPos + text.length;
+    ta.focus();
+    ta.setSelectionRange(pos, pos);
+    saveTemplate();
+    renderPreview();
+  }
+
+  function renderChips(){
+    el.chipRow.innerHTML = header.map(function(tok, i){
+      return '<button type="button" class="chip" data-tok="' + esc(tok) + '">{{' + esc(tok) + '}}<span style="opacity:.6"> &middot; ' + esc(headerRaw[i]) + '</span></button>';
+    }).join('');
+    Array.prototype.forEach.call(el.chipRow.querySelectorAll('.chip'), function(btn){
+      btn.addEventListener('click', function(){ insertAtCursor('{{' + btn.dataset.tok + '}}'); });
+    });
+    el.tokenPanel.style.display = header.length ? '' : 'none';
+  }
+
+  // ---------- template engine (ported from js/app.js's npaNoticeFill/npaNoticeInlineMarkup/npaNoticeRenderBodyHTML) ----------
+  function fillTemplate(tpl, data){
+    return tpl.replace(/\{\{(\w+)\}\}/g, function(m, k){ return (k in data && data[k]!=null) ? String(data[k]) : m; });
+  }
+  function inlineMarkup(t){
+    t = t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+    t = t.replace(/__(.+?)__/g, '<u>$1</u>');
+    t = t.replace(/==(.+?)==/g, '<span style="background:rgba(255,224,46,.75);padding:0 2px;border-radius:2px">$1</span>');
+    return t;
+  }
+  function renderBodyHTML(text){
+    var lines = text.split('\n');
+    var html = '';
+    lines.forEach(function(line, i){
+      var sep = (i < lines.length-1) ? '<br>' : '';
+      if(line === '---'){ html += '<hr style="border:none;border-top:1px solid #999;margin:13px 0;">'; return; }
+      var m = line.match(/^<<(.*)>>$/);
+      if(m){ html += '<div style="text-align:center;margin:3px 0;">' + inlineMarkup(esc(m[1])) + '</div>'; return; }
+      if(line.indexOf('>>')===0){ html += '<div style="text-align:right;margin:3px 0;">' + inlineMarkup(esc(line.slice(2))) + '</div>'; return; }
+      if(line.indexOf('▶ ')===0){ html += '<div style="display:flex;gap:7px;margin:6px 0;align-items:flex-start;"><span style="flex-shrink:0;font-size:10px;margin-top:4px;">▶</span><span>' + inlineMarkup(esc(line.slice(2))) + '</span></div>'; return; }
+      if(line.indexOf('• ')===0){ html += '<div style="display:flex;gap:7px;margin:3px 0;font-size:11.5px;color:#333;"><span style="flex-shrink:0;">•</span><span>' + inlineMarkup(esc(line.slice(2))) + '</span></div>'; return; }
+      if(line.indexOf('@@')!==-1){
+        var parts = line.split('@@');
+        html += '<div style="display:flex;justify-content:space-between;gap:10px;margin:3px 0;"><span>' + inlineMarkup(esc(parts[0])) + '</span><span>' + inlineMarkup(esc(parts[1])) + '</span></div>';
+        return;
+      }
+      html += inlineMarkup(esc(line)) + sep;
+    });
+    return html;
+  }
+  var LOGO_SVG = '<svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="#1a1a1a" stroke-width="1.6" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><path d="M12 7v10M7 12h10"/></svg>';
+  function buildLetterHTML(fields, includeLetterhead){
+    var bodyHtml = renderBodyHTML(fillTemplate(el.templateText.value || DEFAULT_TEMPLATE, fields));
+    var head = includeLetterhead
+      ? '<div style="border-bottom:2px solid #1a1a1a;padding-bottom:10px;margin-bottom:16px;">'
+        +   '<div style="display:flex;justify-content:flex-end;align-items:center;gap:12px;">'
+        +     LOGO_SVG
+        +     '<div style="text-align:right;">'
+        +       '<div style="font-size:19px;font-weight:700;">उत्तर प्रदेश ग्रामीण बैंक</div>'
+        +       '<div style="font-family:Arial,sans-serif;font-size:11px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:#444;margin-top:1px;">UTTAR PRADESH GRAMIN BANK</div>'
+        +       '<div style="font-family:Arial,sans-serif;font-size:10px;color:#666;margin-top:2px;line-height:1.4;">(सरकार के स्वामित्वाधीन अनुसूचित बैंक)<br>(Scheduled Bank Owned by Government)</div>'
+        +     '</div>'
+        +   '</div>'
+        + '</div>'
+      : '';
+    var foot = includeLetterhead
+      ? '<div style="text-align:center;font-family:Arial,sans-serif;font-size:10px;color:#555;line-height:1.6;margin-top:18px;padding-top:12px;border-top:1px solid #ccc;">'
+        +   '<div>क्षेत्रीय कार्यालय: मुंशी गजाधर सिंह मार्ग, अलीगढ़ रोड, हाथरस–204101</div>'
+        +   '<div>Regional Office: Munshi Gajadhar Singh Marg, Aligarh Road, Hathras – 204101</div>'
+        + '</div>'
+      : '';
+    return '<div style="font-family:\'Noto Sans Devanagari\',\'Mangal\',Arial,sans-serif;width:800px;padding:34px 40px 26px;color:#1a1a1a;font-size:14.5px;line-height:1.85;background:#fff;">'
+      + head + bodyHtml + foot + '</div>';
+  }
+
+  // ---------- preview ----------
+  function todayFields(){ return { Today: fmtDate(new Date()) }; }
+  function fmtDate(d){
+    function p(n){ return n<10 ? '0'+n : ''+n; }
+    return p(d.getDate()) + '-' + p(d.getMonth()+1) + '-' + d.getFullYear();
+  }
+  function renderPreview(){
+    if(!rows.length){
+      el.previewHost.textContent = 'Upload a file to see a preview.';
+      el.previewHost.style.color = 'var(--ink-muted)';
+      return;
+    }
+    var fields = Object.assign({}, todayFields(), rows[0]);
+    el.previewHost.innerHTML = buildLetterHTML(fields, el.letterheadChk.checked);
+  }
+
+  // ---------- file loading ----------
+  function loadWorkbookRows(allRows){
+    if(!allRows.length){ throw new Error('This file has no rows.'); }
+    var hdrRow = allRows[0];
+    var used = new Set();
+    header = hdrRow.map(function(h){ return tokenNameFromHeader(h, used); });
+    headerRaw = hdrRow.map(function(h){ return String(h==null?'':h); });
+    rows = [];
+    for(var i=1;i<allRows.length;i++){
+      var r = allRows[i];
+      if(!r || r.every(function(c){ return String(c==null?'':c).trim()===''; })) continue;
+      var obj = {};
+      header.forEach(function(tok, j){ obj[tok] = r[j]==null ? '' : String(r[j]); });
+      rows.push(obj);
+    }
+    if(!rows.length){ throw new Error('No data rows found below the header row.'); }
+  }
+
+  function handleFile(file){
+    clearMsg();
+    fileLoaded = false;
+    var isCsv = /\.csv$/i.test(file.name);
+    var reader = new FileReader();
+    reader.onload = function(e){
+      try{
+        var allRows;
+        if(isCsv){
+          allRows = parseCSV(String(e.target.result));
+        } else {
+          var data = new Uint8Array(e.target.result);
+          var wb = XLSX.read(data, {type:'array'});
+          var sheetName = wb.SheetNames[0];
+          allRows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {header:1, raw:false, defval:''});
+        }
+        loadWorkbookRows(allRows);
+        fileLoaded = true;
+        el.fileStatus.textContent = '✔ ' + rows.length.toLocaleString('en-IN') + ' row(s), ' + header.length + ' field(s) detected.';
+        renderChips();
+        renderPreview();
+        el.btnGenerate.disabled = false;
+        el.btnPrint.disabled = false;
+        showMsg('ok', '✔ File loaded. Write your letter using the fields above, then Generate.');
+      }catch(err){
+        fileLoaded = false;
+        el.btnGenerate.disabled = true;
+        el.btnPrint.disabled = true;
+        showMsg('err', 'Could not read this file: ' + (err && err.message || err));
+      }
+    };
+    reader.onerror = function(){ showMsg('err', 'Could not read this file.'); };
+    if(isCsv) reader.readAsText(file); else reader.readAsArrayBuffer(file);
+  }
+
+  el.dropzone.addEventListener('click', function(){ el.fileInput.click(); });
+  el.fileInput.addEventListener('change', function(){ if(el.fileInput.files[0]) handleFile(el.fileInput.files[0]); });
+  ['dragover','dragenter'].forEach(function(evt){
+    el.dropzone.addEventListener(evt, function(e){ e.preventDefault(); el.dropzone.classList.add('drag'); });
+  });
+  ['dragleave','drop'].forEach(function(evt){
+    el.dropzone.addEventListener(evt, function(e){ e.preventDefault(); el.dropzone.classList.remove('drag'); });
+  });
+  el.dropzone.addEventListener('drop', function(e){
+    var f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if(f) handleFile(f);
+  });
+
+  // ---------- PDF pipeline (ported from js/app.js's npaNoticeRenderCanvas/addCanvasFitOnePageToDoc/npaNoticeBuildCombinedPdfBlob) ----------
+  function addCanvasFitOnePageToDoc(doc, canvas, margin, usableW, usableH){
+    var scale = Math.min(usableW / canvas.width, usableH / canvas.height);
+    var w = canvas.width * scale, h = canvas.height * scale;
+    var x = margin + (usableW - w) / 2;
+    doc.addImage(canvas.toDataURL('image/png'), 'PNG', x, margin, w, h);
+  }
+  function renderLetterCanvas(html){
+    var printEl = document.getElementById('printArea');
+    var prevCss = printEl.style.cssText;
+    printEl.innerHTML = html;
+    printEl.style.cssText = 'display:block;position:fixed;left:-9999px;top:0;width:800px;background:#fff;padding:0;z-index:-1';
+    return (document.fonts && document.fonts.ready ? document.fonts.ready.catch(function(){}) : Promise.resolve())
+      .then(function(){ return new Promise(function(r){ setTimeout(r, 60); }); })
+      .then(function(){ return html2canvas(printEl, { scale:2, backgroundColor:'#ffffff' }); })
+      .then(function(canvas){ printEl.style.cssText = prevCss; printEl.innerHTML = ''; return canvas; })
+      .catch(function(err){ printEl.style.cssText = prevCss; printEl.innerHTML = ''; throw err; });
+  }
+  var __pdfBusy = false;
+  function buildCombinedPdfBlob(onProgress){
+    var jsPDF = window.jspdf.jsPDF;
+    var doc = new jsPDF({ unit:'pt', format:'a4', orientation:'portrait', compress:true });
+    var margin = 24;
+    var usableW = doc.internal.pageSize.getWidth() - margin*2;
+    var usableH = doc.internal.pageSize.getHeight() - margin*2;
+    var includeLetterhead = el.letterheadChk.checked;
+    var tpl = el.templateText.value || DEFAULT_TEMPLATE;
+    var chain = Promise.resolve();
+    rows.forEach(function(rowFields, i){
+      chain = chain.then(function(){
+        var fields = Object.assign({}, todayFields(), rowFields);
+        var bodyHtml = renderBodyHTML(fillTemplate(tpl, fields));
+        var html = buildLetterHTMLFromBody(bodyHtml, includeLetterhead);
+        return renderLetterCanvas(html).then(function(canvas){
+          if(i>0) doc.addPage();
+          addCanvasFitOnePageToDoc(doc, canvas, margin, usableW, usableH);
+          if(onProgress) onProgress(i+1, rows.length);
+        });
+      });
+    });
+    return chain.then(function(){ return doc.output('blob'); });
+  }
+  function buildLetterHTMLFromBody(bodyHtml, includeLetterhead){
+    var head = includeLetterhead
+      ? '<div style="border-bottom:2px solid #1a1a1a;padding-bottom:10px;margin-bottom:16px;">'
+        +   '<div style="display:flex;justify-content:flex-end;align-items:center;gap:12px;">'
+        +     LOGO_SVG
+        +     '<div style="text-align:right;">'
+        +       '<div style="font-size:19px;font-weight:700;">उत्तर प्रदेश ग्रामीण बैंक</div>'
+        +       '<div style="font-family:Arial,sans-serif;font-size:11px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:#444;margin-top:1px;">UTTAR PRADESH GRAMIN BANK</div>'
+        +       '<div style="font-family:Arial,sans-serif;font-size:10px;color:#666;margin-top:2px;line-height:1.4;">(सरकार के स्वामित्वाधीन अनुसूचित बैंक)<br>(Scheduled Bank Owned by Government)</div>'
+        +     '</div>'
+        +   '</div>'
+        + '</div>'
+      : '';
+    var foot = includeLetterhead
+      ? '<div style="text-align:center;font-family:Arial,sans-serif;font-size:10px;color:#555;line-height:1.6;margin-top:18px;padding-top:12px;border-top:1px solid #ccc;">'
+        +   '<div>क्षेत्रीय कार्यालय: मुंशी गजाधर सिंह मार्ग, अलीगढ़ रोड, हाथरस–204101</div>'
+        +   '<div>Regional Office: Munshi Gajadhar Singh Marg, Aligarh Road, Hathras – 204101</div>'
+        + '</div>'
+      : '';
+    return '<div style="font-family:\'Noto Sans Devanagari\',\'Mangal\',Arial,sans-serif;width:800px;padding:34px 40px 26px;color:#1a1a1a;font-size:14.5px;line-height:1.85;background:#fff;">'
+      + head + bodyHtml + foot + '</div>';
+  }
+
+  function promptFilename(defaultBase){
+    var name = window.prompt('Save as (file name, without extension):', defaultBase);
+    if(name === null) return null;
+    name = name.trim();
+    if(!name) name = defaultBase;
+    return name.replace(/[\\/:*?"<>|]/g, '_');
+  }
+  function dateStamp(){
+    var d = new Date();
+    function p(n){ return n < 10 ? '0'+n : ''+n; }
+    return d.getFullYear() + p(d.getMonth()+1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes());
+  }
+  function anchorDownload(blob, filename){
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 30000);
+  }
+
+  el.btnGenerate.addEventListener('click', function(){
+    if(!fileLoaded || !rows.length || __pdfBusy) return;
+    if(rows.length > 1000 && !confirm('You are about to generate ' + rows.length.toLocaleString('en-IN') + ' letters. This can take a long time and produce a very large PDF. Continue?')) return;
+    var defaultBase = 'Letters_' + dateStamp();
+    var base = promptFilename(defaultBase);
+    if(base === null) return;
+    __pdfBusy = true;
+    el.btnGenerate.disabled = true;
+    var origLabel = el.btnGenerate.textContent;
+    clearMsg();
+    buildCombinedPdfBlob(function(done, total){
+      el.btnGenerate.textContent = 'Preparing ' + done + ' of ' + total + '…';
+    }).then(function(blob){
+      anchorDownload(blob, base + '.pdf');
+      showMsg('ok', '✔ Generated ' + rows.length.toLocaleString('en-IN') + ' letter(s) as one PDF.');
+    }).catch(function(err){
+      showMsg('err', 'Could not generate the PDF: ' + (err && err.message || err));
+    }).finally(function(){
+      __pdfBusy = false;
+      el.btnGenerate.disabled = false;
+      el.btnGenerate.textContent = origLabel;
+    });
+  });
+
+  // ---------- print (independent path, own dynamic @page style) ----------
+  function printWithPageSize(pageCss){
+    var style = document.getElementById('dynamicPrintPage');
+    if(!style){ style = document.createElement('style'); style.id = 'dynamicPrintPage'; document.head.appendChild(style); }
+    style.textContent = '@page{' + pageCss + '}';
+    window.print();
+  }
+  el.btnPrint.addEventListener('click', function(){
+    if(!fileLoaded || !rows.length) return;
+    if(rows.length > 50 && !confirm('You are about to print ' + rows.length.toLocaleString('en-IN') + ' letters. Continue?')) return;
+    var includeLetterhead = el.letterheadChk.checked;
+    var tpl = el.templateText.value || DEFAULT_TEMPLATE;
+    var html = rows.map(function(rowFields){
+      var fields = Object.assign({}, todayFields(), rowFields);
+      return '<div class="lg-print-page">' + buildLetterHTMLFromBody(renderBodyHTML(fillTemplate(tpl, fields)), includeLetterhead) + '</div>';
+    }).join('');
+    document.getElementById('printArea').innerHTML = '<div class="lg-print-wrap">' + html + '</div>';
+    document.getElementById('printArea').style.cssText = '';
+    printWithPageSize('size:A4;margin:12mm');
+    setTimeout(function(){
+      document.getElementById('printArea').innerHTML = '';
+      document.getElementById('printArea').style.cssText = 'position:fixed;left:-9999px;top:0;width:800px';
+    }, 500);
+  });
+
+  var printCss = document.createElement('style');
+  printCss.textContent = '.lg-print-page:not(:last-child){page-break-after:always} .lg-print-page{page-break-inside:avoid} @media screen{.lg-print-wrap{display:none}}';
+  document.head.appendChild(printCss);
+
+  /* ---------- same-origin iframe self-sizing as every other Utility tool ---------- */
+  function resizeFrame(){
+    if(!window.frameElement) return;
+    requestAnimationFrame(function(){ window.frameElement.style.height = document.documentElement.scrollHeight + 'px'; });
+  }
+  window.addEventListener('resize', resizeFrame);
+  window.addEventListener('load', resizeFrame);
+  new MutationObserver(resizeFrame).observe(document.body, { childList: true, subtree: true, attributes: true });
+  resizeFrame();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EMI / Loan Calculator</title>
+<script>
+(function(){
+  function syncTheme(){
+    try{
+      var t = localStorage.getItem('upgb-theme');
+      if(t==='dark'||t==='light') document.documentElement.dataset.theme = t;
+      else delete document.documentElement.dataset.theme;
+    }catch(e){}
+  }
+  syncTheme();
+  window.addEventListener('storage', function(e){ if(e.key==='upgb-theme') syncTheme(); });
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<!-- Self-hosted, not CDN-linked, matching every other tool in this app.
+     exceljs does the Export-to-Excel; no PDF library needed here, Print
+     uses the browser's own native print via a dynamic @page style. -->
+<script src="../js/vendor/exceljs.min.js"></script>
+<style>
+  :root{
+    --bg:#F1FBF6; --surface:#FFFFFF; --surface-muted:#E9F8F0;
+    --ink:#153A2C; --ink-muted:#5E8372; --line:#CDE9DB;
+    --accent:#1C8F63; --accent-ink:#FFFFFF; --accent-soft:#D7F2E4;
+    --warn:#A15C00; --warn-soft:#FBE8CE; --danger:#B42318; --danger-soft:#FBE4E1;
+    --good:#18794E; --good-soft:#DFF3E7;
+    --shadow: 0 1px 2px rgba(21,58,44,.08), 0 6px 20px -8px rgba(21,58,44,.16);
+    --shadow-lg: 0 10px 28px rgba(21,58,44,.20);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0E1A15; --surface:#16251E; --surface-muted:#1C2E25;
+      --ink:#E4F5EC; --ink-muted:#8FB4A2; --line:#2A3F34;
+      --accent:#4FCB97; --accent-ink:#06180F; --accent-soft:#1C3A2C;
+      --warn:#E0A94A; --warn-soft:#3A2D16; --danger:#F0796E; --danger-soft:#3A1E1C;
+      --good:#5DCB94; --good-soft:#163424;
+      --shadow: 0 1px 2px rgba(0,0,0,.4); --shadow-lg: 0 14px 34px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0E1A15; --surface:#16251E; --surface-muted:#1C2E25;
+    --ink:#E4F5EC; --ink-muted:#8FB4A2; --line:#2A3F34;
+    --accent:#4FCB97; --accent-ink:#06180F; --accent-soft:#1C3A2C;
+    --warn:#E0A94A; --warn-soft:#3A2D16; --danger:#F0796E; --danger-soft:#3A1E1C;
+    --good:#5DCB94; --good-soft:#163424;
+    --shadow: 0 1px 2px rgba(0,0,0,.4); --shadow-lg: 0 14px 34px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);overflow-x:hidden}
+  body{color:var(--ink);font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;font-size:14px;line-height:1.5}
+  .wrap{max-width:1180px;margin:0 auto;padding:16px 18px 40px}
+  h2.sec{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted);margin:0 0 10px;font-weight:700}
+
+  .panel{min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:16px;margin-bottom:16px}
+  .split{display:grid;grid-template-columns:1fr 1.3fr;gap:16px}
+  @media (max-width:820px){ .split{grid-template-columns:1fr} }
+
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12.2px;color:var(--ink-muted);margin-bottom:5px;font-weight:600}
+  .field input[type=number],.field input[type=date],.field select{
+    width:100%;border:1px solid var(--line);background:var(--surface-muted);color:var(--ink);
+    border-radius:8px;padding:9px 10px;font-size:14px;font-family:'IBM Plex Mono',monospace}
+  .field .unit-row{display:flex;gap:8px}
+  .field .unit-row input{flex:1}
+  .field .unit-row select{flex:0 0 110px}
+  .toggle-row{display:flex;gap:8px;margin-bottom:14px}
+  .toggle-btn{flex:1;border:1px solid var(--line);background:var(--surface-muted);color:var(--ink);
+    border-radius:8px;padding:9px 10px;font-size:12.6px;font-weight:600;cursor:pointer;text-align:center}
+  .toggle-btn.active{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+
+  .hero{background:var(--accent-soft);border-radius:14px;padding:22px;text-align:center;margin-bottom:14px}
+  .hero .label{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted);font-weight:700}
+  .hero .value{font-size:34px;font-weight:700;font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;margin-top:4px;color:var(--ink)}
+
+  .summary-row{display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+  .summary-card{flex:1;min-width:140px;background:var(--surface-muted);border-radius:10px;padding:12px 14px}
+  .summary-card .label{font-size:11px;color:var(--ink-muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .summary-card .value{font-size:18px;font-weight:700;font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;margin-top:2px}
+
+  details.sched{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  details.sched summary{padding:10px 14px;cursor:pointer;background:var(--surface-muted);font-weight:600;font-size:12.8px;list-style:none}
+  details.sched summary::-webkit-details-marker{display:none}
+  .sched-wrap{max-height:460px;overflow:auto}
+  table.sched-table{width:100%;border-collapse:collapse;font-size:12.2px}
+  table.sched-table th{position:sticky;top:0;background:var(--surface-muted);color:var(--ink-muted);
+    text-align:right;padding:7px 9px;font-weight:700;text-transform:uppercase;font-size:10.3px;letter-spacing:.03em;border-bottom:1px solid var(--line)}
+  table.sched-table th:first-child,table.sched-table td:first-child{text-align:left}
+  table.sched-table td{text-align:right;padding:6px 9px;border-bottom:1px solid var(--line);font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  table.sched-table tr:nth-child(even) td{background:rgba(0,0,0,.015)}
+
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+  .tbgroup{display:flex;flex-wrap:wrap;gap:4px;max-width:100%;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:5px;box-shadow:var(--shadow)}
+  .tbtn{border:none;background:transparent;color:var(--ink);font-size:12.6px;font-family:'IBM Plex Sans',sans-serif;font-weight:500;padding:8px 12px;border-radius:7px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+  .tbtn:hover{background:var(--surface-muted)}
+  .tbtn.primary{background:var(--accent);color:var(--accent-ink);font-weight:600}
+  .tbtn.primary:hover{filter:brightness(1.08)}
+
+  @media print{
+    body *{visibility:hidden}
+    #printArea, #printArea *{visibility:visible}
+    #printArea{position:absolute;left:0;top:0;width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="split">
+    <div class="panel">
+      <h2 class="sec">Loan details</h2>
+      <div class="field">
+        <label>Loan Amount (₹)</label>
+        <input type="number" id="loanAmount" value="1000000" min="0" step="1000">
+      </div>
+      <div class="field">
+        <label>Interest Rate (% p.a.)</label>
+        <input type="number" id="rate" value="9.5" min="0" step="0.05">
+      </div>
+      <div class="field">
+        <label>Tenure</label>
+        <div class="unit-row">
+          <input type="number" id="tenure" value="10" min="1" step="1">
+          <select id="tenureUnit">
+            <option value="years" selected>Years</option>
+            <option value="months">Months</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Start Date (optional)</label>
+        <input type="date" id="startDate">
+      </div>
+      <div class="field">
+        <label>Mode</label>
+        <div class="toggle-row">
+          <button type="button" class="toggle-btn active" id="modeReducing" data-mode="reducing">Reducing Balance</button>
+          <button type="button" class="toggle-btn" id="modeFlat" data-mode="flat">Flat Rate</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="hero">
+        <div class="label">Monthly EMI</div>
+        <div class="value" id="emiValue">₹0</div>
+      </div>
+      <div class="summary-row">
+        <div class="summary-card"><div class="label">Total Interest</div><div class="value" id="totalInterest">₹0</div></div>
+        <div class="summary-card"><div class="label">Total Payment</div><div class="value" id="totalPayment">₹0</div></div>
+        <div class="summary-card"><div class="label">Tenure (months)</div><div class="value" id="tenureMonthsOut">0</div></div>
+      </div>
+
+      <div class="toolbar">
+        <div class="tbgroup">
+          <button type="button" class="tbtn primary" id="btnPrint">🖨 Print</button>
+          <button type="button" class="tbtn" id="btnExcel">📊 Export to Excel</button>
+        </div>
+      </div>
+
+      <details class="sched" open>
+        <summary>Month-by-month amortization schedule</summary>
+        <div class="sched-wrap">
+          <table class="sched-table" id="schedTable">
+            <thead><tr><th>Month</th><th>Date</th><th>Opening Balance</th><th>EMI</th><th>Principal</th><th>Interest</th><th>Closing Balance</th></tr></thead>
+            <tbody id="schedBody"></tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<div id="printArea" style="display:none"></div>
+
+<script>
+(function(){
+  'use strict';
+  var el = {};
+  ['loanAmount','rate','tenure','tenureUnit','startDate','modeReducing','modeFlat',
+   'emiValue','totalInterest','totalPayment','tenureMonthsOut','schedBody',
+   'btnPrint','btnExcel','printArea'].forEach(function(id){ el[id] = document.getElementById(id); });
+
+  var mode = 'reducing';
+
+  function fmtINR(v){
+    if(v==null || isNaN(v)) return '₹0';
+    return '₹' + Number(v).toLocaleString('en-IN', {maximumFractionDigits:0});
+  }
+  function fmtINR2(v){
+    if(v==null || isNaN(v)) return '₹0.00';
+    return '₹' + Number(v).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
+  function fmtDate(d){
+    function p(n){ return n<10 ? '0'+n : ''+n; }
+    return p(d.getDate()) + '-' + p(d.getMonth()+1) + '-' + d.getFullYear();
+  }
+  function addMonths(d, n){
+    var r = new Date(d.getTime());
+    var day = r.getDate();
+    r.setDate(1);
+    r.setMonth(r.getMonth() + n);
+    var lastDay = new Date(r.getFullYear(), r.getMonth()+1, 0).getDate();
+    r.setDate(Math.min(day, lastDay));
+    return r;
+  }
+
+  // ---------- core math (reducing-balance standard annuity formula; flat-rate standard convention) ----------
+  function computeSchedule(principal, annualRatePct, tenureMonths, mode, startDate){
+    var n = Math.max(1, Math.round(tenureMonths));
+    var schedule = [];
+    var emi, totalInterest;
+    if(mode === 'flat'){
+      var tenureYears = n / 12;
+      totalInterest = principal * (annualRatePct/100) * tenureYears;
+      emi = (principal + totalInterest) / n;
+      var fixedInterest = totalInterest / n;
+      var fixedPrincipal = principal / n;
+      var balance = principal;
+      for(var i=1;i<=n;i++){
+        var opening = balance;
+        var principalPart = (i===n) ? opening : fixedPrincipal;
+        var interestPart = fixedInterest;
+        balance = Math.max(0, opening - principalPart);
+        schedule.push({ month:i, date: addMonths(startDate, i-1), opening:opening, emi: principalPart+interestPart, principal: principalPart, interest: interestPart, closing: balance });
+      }
+    } else {
+      var r = (annualRatePct/100) / 12;
+      if(r === 0){
+        emi = principal / n;
+        var bal = principal;
+        for(var j=1;j<=n;j++){
+          var open2 = bal;
+          var princ = (j===n) ? open2 : emi;
+          bal = Math.max(0, open2 - princ);
+          schedule.push({ month:j, date: addMonths(startDate, j-1), opening:open2, emi: princ, principal: princ, interest: 0, closing: bal });
+        }
+      } else {
+        var pow = Math.pow(1+r, n);
+        emi = principal * r * pow / (pow - 1);
+        var bal2 = principal;
+        for(var k=1;k<=n;k++){
+          var open3 = bal2;
+          var interest3 = open3 * r;
+          var principal3 = (k===n) ? open3 : Math.min(emi - interest3, open3);
+          var emiThis = (k===n) ? (principal3 + interest3) : emi;
+          bal2 = Math.max(0, open3 - principal3);
+          schedule.push({ month:k, date: addMonths(startDate, k-1), opening:open3, emi: emiThis, principal: principal3, interest: interest3, closing: bal2 });
+        }
+      }
+      totalInterest = schedule.reduce(function(s,row){ return s + row.interest; }, 0);
+    }
+    return { emi: emi, totalInterest: totalInterest, schedule: schedule };
+  }
+
+  function currentInputs(){
+    var principal = Number(el.loanAmount.value) || 0;
+    var rate = Number(el.rate.value) || 0;
+    var tenureVal = Number(el.tenure.value) || 0;
+    var tenureMonths = el.tenureUnit.value === 'years' ? tenureVal * 12 : tenureVal;
+    var startDate = el.startDate.value ? new Date(el.startDate.value + 'T00:00:00') : new Date();
+    return { principal: principal, rate: rate, tenureMonths: tenureMonths, startDate: startDate };
+  }
+
+  function render(){
+    var inp = currentInputs();
+    if(inp.principal<=0 || inp.tenureMonths<=0){
+      el.emiValue.textContent = '₹0';
+      el.totalInterest.textContent = '₹0';
+      el.totalPayment.textContent = '₹0';
+      el.tenureMonthsOut.textContent = '0';
+      el.schedBody.innerHTML = '';
+      return;
+    }
+    var result = computeSchedule(inp.principal, inp.rate, inp.tenureMonths, mode, inp.startDate);
+    el.emiValue.textContent = fmtINR2(result.emi);
+    el.totalInterest.textContent = fmtINR(result.totalInterest);
+    el.totalPayment.textContent = fmtINR(inp.principal + result.totalInterest);
+    el.tenureMonthsOut.textContent = result.schedule.length;
+    el.schedBody.innerHTML = result.schedule.map(function(row){
+      return '<tr><td>' + row.month + '</td><td>' + fmtDate(row.date) + '</td><td>' + fmtINR2(row.opening) + '</td>' +
+        '<td>' + fmtINR2(row.emi) + '</td><td>' + fmtINR2(row.principal) + '</td><td>' + fmtINR2(row.interest) + '</td><td>' + fmtINR2(row.closing) + '</td></tr>';
+    }).join('');
+    window.__emiLastResult = result;
+    window.__emiLastInputs = inp;
+  }
+
+  ['input','change'].forEach(function(evt){
+    [el.loanAmount, el.rate, el.tenure, el.tenureUnit, el.startDate].forEach(function(node){
+      node.addEventListener(evt, render);
+    });
+  });
+  function setMode(m){
+    mode = m;
+    el.modeReducing.classList.toggle('active', m==='reducing');
+    el.modeFlat.classList.toggle('active', m==='flat');
+    render();
+  }
+  el.modeReducing.addEventListener('click', function(){ setMode('reducing'); });
+  el.modeFlat.addEventListener('click', function(){ setMode('flat'); });
+
+  // ---------- print (A4 landscape, local printWithPageSize-style copy) ----------
+  function printWithPageSize(pageCss){
+    var style = document.getElementById('dynamicPrintPage');
+    if(!style){ style = document.createElement('style'); style.id = 'dynamicPrintPage'; document.head.appendChild(style); }
+    style.textContent = '@page{' + pageCss + '}';
+    window.print();
+  }
+  el.btnPrint.addEventListener('click', function(){
+    var result = window.__emiLastResult, inp = window.__emiLastInputs;
+    if(!result){ return; }
+    var rows = result.schedule.map(function(row){
+      return '<tr><td>' + row.month + '</td><td>' + fmtDate(row.date) + '</td><td>' + fmtINR2(row.opening) + '</td>' +
+        '<td>' + fmtINR2(row.emi) + '</td><td>' + fmtINR2(row.principal) + '</td><td>' + fmtINR2(row.interest) + '</td><td>' + fmtINR2(row.closing) + '</td></tr>';
+    }).join('');
+    el.printArea.innerHTML = '<div style="font-family:IBM Plex Sans,sans-serif;color:#111;padding:10px">'
+      + '<h2 style="margin:0 0 4px">EMI / Loan Calculator</h2>'
+      + '<div style="font-size:12px;color:#555;margin-bottom:10px">Loan Amount: ' + fmtINR(inp.principal) + ' &middot; Rate: ' + inp.rate + '% p.a. &middot; Tenure: ' + result.schedule.length + ' months &middot; Mode: ' + (mode==='flat'?'Flat Rate':'Reducing Balance') + ' &middot; EMI: ' + fmtINR2(result.emi) + '</div>'
+      + '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr>'
+      + '<th style="border:1px solid #ccc;padding:4px;text-align:left">Month</th><th style="border:1px solid #ccc;padding:4px">Date</th>'
+      + '<th style="border:1px solid #ccc;padding:4px">Opening</th><th style="border:1px solid #ccc;padding:4px">EMI</th>'
+      + '<th style="border:1px solid #ccc;padding:4px">Principal</th><th style="border:1px solid #ccc;padding:4px">Interest</th>'
+      + '<th style="border:1px solid #ccc;padding:4px">Closing</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    el.printArea.style.display = 'block';
+    printWithPageSize('size:A4 landscape;margin:10mm');
+    setTimeout(function(){ el.printArea.style.display = 'none'; el.printArea.innerHTML = ''; }, 500);
+  });
+
+  // ---------- export to excel (ExcelJS, same shape already proven elsewhere in this app) ----------
+  function anchorDownload(blob, filename){
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 30000);
+  }
+  el.btnExcel.addEventListener('click', function(){
+    var result = window.__emiLastResult, inp = window.__emiLastInputs;
+    if(!result) return;
+    var wb = new ExcelJS.Workbook();
+    var ws = wb.addWorksheet('Amortization Schedule');
+    ws.columns = [
+      {header:'Month', key:'month', width:8},
+      {header:'Date', key:'date', width:14},
+      {header:'Opening Balance', key:'opening', width:18},
+      {header:'EMI', key:'emi', width:14},
+      {header:'Principal', key:'principal', width:14},
+      {header:'Interest', key:'interest', width:14},
+      {header:'Closing Balance', key:'closing', width:18},
+    ];
+    var headerRow = ws.getRow(1);
+    headerRow.font = { bold:true, color:{argb:'FFFFFFFF'} };
+    headerRow.eachCell(function(cell){ cell.fill = {type:'pattern', pattern:'solid', fgColor:{argb:'FF1C8F63'}}; });
+    result.schedule.forEach(function(row){
+      ws.addRow({ month: row.month, date: fmtDate(row.date), opening: Number(row.opening.toFixed(2)), emi: Number(row.emi.toFixed(2)), principal: Number(row.principal.toFixed(2)), interest: Number(row.interest.toFixed(2)), closing: Number(row.closing.toFixed(2)) });
+    });
+    ws.getColumn('opening').numFmt = '#,##0.00';
+    ws.getColumn('emi').numFmt = '#,##0.00';
+    ws.getColumn('principal').numFmt = '#,##0.00';
+    ws.getColumn('interest').numFmt = '#,##0.00';
+    ws.getColumn('closing').numFmt = '#,##0.00';
+    ws.views = [{state:'frozen', ySplit:1}];
+    wb.xlsx.writeBuffer().then(function(buf){
+      anchorDownload(new Blob([buf], {type:'application/octet-stream'}), 'EMI_Schedule_' + Date.now() + '.xlsx');
+    });
+  });
+
+  render();
+
+  function resizeFrame(){
+    if(!window.frameElement) return;
+    requestAnimationFrame(function(){ window.frameElement.style.height = document.documentElement.scrollHeight + 'px'; });
+  }
+  window.addEventListener('resize', resizeFrame);
+  window.addEventListener('load', resizeFrame);
+  new MutationObserver(resizeFrame).observe(document.body, { childList: true, subtree: true, attributes: true });
+  resizeFrame();
+})();
+</script>
+</body>
+</html>
