@@ -66,7 +66,7 @@
   html,body{margin:0;background:var(--bg);overflow-x:hidden}
   body{color:var(--ink);font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;font-size:14px;line-height:1.5}
   .wrap{max-width:1180px;margin:0 auto;padding:16px 18px 40px}
-  h2.sec{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted);margin:0 0 10px;font-weight:700}
+  h2.sec{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted);margin:0 0 10px;font-weight:700;display:flex;align-items:center}
 
   .msg{border-radius:10px;padding:10px 14px;font-size:12.5px;margin-bottom:12px;display:none}
   .msg.show{display:block}
@@ -84,10 +84,13 @@
 
   .panel{min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:16px;margin-bottom:16px}
 
-  .chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
-  .chip{border:1px solid var(--line);background:var(--surface-muted);color:var(--accent);font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;padding:5px 9px;border-radius:7px;cursor:pointer}
-  .chip:hover{background:var(--accent-soft)}
+  .chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .chip{border:1px solid var(--line);background:var(--accent-soft);color:var(--accent);font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;padding:6px 13px;border-radius:999px;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease}
+  .chip:hover{transform:translateY(-1px);box-shadow:0 6px 14px -8px rgba(181,120,30,.45)}
+  :root[data-theme="dark"] .chip:hover, :root:not([data-theme="light"]) .chip:hover{box-shadow:0 6px 14px -8px rgba(224,169,74,.35)}
   .chip-hint{font-size:11.5px;color:var(--ink-muted);margin-bottom:8px}
+
+  .step-num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:7px;background:var(--accent-soft);color:var(--accent);font-size:11px;font-weight:700;margin-right:8px;flex-shrink:0;font-family:'IBM Plex Sans',sans-serif}
 
   textarea#templateText{width:100%;min-height:260px;border:1px solid var(--line);background:var(--surface-muted);color:var(--ink);border-radius:10px;padding:12px;font-family:'IBM Plex Mono',monospace;font-size:12.6px;line-height:1.7;resize:vertical}
   .markup-help{font-size:11px;color:var(--ink-muted);margin-top:8px;line-height:1.7}
@@ -106,10 +109,19 @@
   .tbtn.primary:hover{filter:brightness(1.08)}
   .tbtn.ghost{border:1px solid var(--line)}
 
-  .preview-stage{background:var(--surface-muted);border-radius:10px;padding:14px;overflow:auto;max-height:640px}
+  .preview-stage{background:var(--surface-muted);border-radius:14px;padding:22px;overflow:auto;max-height:680px}
   .preview-stage > div{margin:0 auto}
+  #previewHost > div{box-shadow:0 18px 40px -18px rgba(58,46,31,.4),0 1px 2px rgba(58,46,31,.08);border-radius:4px}
+  .preview-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .preview-head .tag{font-size:12px;color:var(--ink-muted);font-weight:600}
 
-  @media (max-width:600px){ .toolbar{gap:8px} .tbgroup{flex:1 1 auto;justify-content:center} .tbtn{padding:7px 9px;font-size:11.8px} }
+  .lg-grid{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
+  .lg-col-left{flex:999 1 420px;min-width:0}
+  .lg-col-right{flex:1 1 380px;min-width:300px;position:sticky;top:8px}
+
+  .tbtn svg{width:15px;height:15px;flex-shrink:0}
+
+  @media (max-width:600px){ .toolbar{gap:8px} .tbgroup{flex:1 1 auto;justify-content:center} .tbtn{padding:7px 9px;font-size:11.8px} .lg-col-right{position:static} }
 </style>
 </head>
 <body>
@@ -117,47 +129,58 @@
 
   <div id="msgBox" class="msg"></div>
 
-  <div class="panel">
-    <h2 class="sec">1. Upload your data (Excel or CSV)</h2>
-    <div id="dropzone" class="dropzone">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 3v5h5"/><path d="M12 11v6M9 14l3-3 3 3"/></svg>
-      <b>Open an Excel or CSV file</b>
-      <span>First row = column headers. Click to browse, or drag &amp; drop — nothing is uploaded anywhere, everything stays in this browser tab</span>
+  <div class="lg-grid">
+    <div class="lg-col-left">
+
+      <div class="panel">
+        <h2 class="sec"><span class="step-num">1</span>Upload your data (Excel or CSV)</h2>
+        <div id="dropzone" class="dropzone">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 3v5h5"/><path d="M12 11v6M9 14l3-3 3 3"/></svg>
+          <b>Open an Excel or CSV file</b>
+          <span>First row = column headers. Click to browse, or drag &amp; drop — nothing is uploaded anywhere, everything stays in this browser tab</span>
+        </div>
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+        <div id="fileStatus" class="chip-hint"></div>
+      </div>
+
+      <div class="panel" id="tokenPanel" style="display:none">
+        <h2 class="sec"><span class="step-num">2</span>Insert a field into your letter</h2>
+        <div class="chip-hint" style="margin-left:28px">Click a field below to insert it at the cursor in your template.</div>
+        <div class="chip-row" id="chipRow" style="margin-left:28px"></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sec"><span class="step-num">3</span>Write your letter template</h2>
+        <textarea id="templateText" placeholder="Dear {{Name}},&#10;&#10;This is to inform you that...&#10;&#10;**Bold text**, __underlined text__, ==highlighted text==.&#10;<<Centered line>>&#10;>>Right-aligned line&#10;▶ A bullet point&#10;---&#10;@@Left side@@Right side"></textarea>
+        <div class="markup-help">
+          Markup: <code>**bold**</code> &middot; <code>__underline__</code> &middot; <code>==highlight==</code> &middot; <code>&lt;&lt;centered line&gt;&gt;</code> &middot; <code>&gt;&gt;right-aligned line</code> &middot; <code>▶ bullet</code> &middot; <code>• small bullet</code> &middot; <code>---</code> (divider) &middot; <code>left@@right</code> (split line)
+        </div>
+        <div class="row-flex">
+          <label class="chk"><input type="checkbox" id="letterheadChk" checked> Include bank letterhead</label>
+          <button type="button" class="tbtn ghost" id="btnResetTemplate">Reset template</button>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="tbgroup">
+          <button type="button" class="tbtn primary" id="btnGenerate" disabled><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg> Generate combined PDF</button>
+          <button type="button" class="tbtn ghost" id="btnPrint" disabled><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V3h12v6M6 18h12v-6H6z"/><rect x="6" y="14" width="12" height="7" rx="1"/></svg> Print</button>
+        </div>
+      </div>
+
     </div>
-    <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
-    <div id="fileStatus" class="chip-hint"></div>
-  </div>
 
-  <div class="panel" id="tokenPanel" style="display:none">
-    <h2 class="sec">2. Insert a field into your letter</h2>
-    <div class="chip-hint">Click a field below to insert it at the cursor in your template.</div>
-    <div class="chip-row" id="chipRow"></div>
-  </div>
-
-  <div class="panel">
-    <h2 class="sec">3. Write your letter template</h2>
-    <textarea id="templateText" placeholder="Dear {{Name}},&#10;&#10;This is to inform you that...&#10;&#10;**Bold text**, __underlined text__, ==highlighted text==.&#10;<<Centered line>>&#10;>>Right-aligned line&#10;▶ A bullet point&#10;---&#10;@@Left side@@Right side"></textarea>
-    <div class="markup-help">
-      Markup: <code>**bold**</code> &middot; <code>__underline__</code> &middot; <code>==highlight==</code> &middot; <code>&lt;&lt;centered line&gt;&gt;</code> &middot; <code>&gt;&gt;right-aligned line</code> &middot; <code>▶ bullet</code> &middot; <code>• small bullet</code> &middot; <code>---</code> (divider) &middot; <code>left@@right</code> (split line)
+    <div class="lg-col-right">
+      <div class="panel" style="margin-bottom:0">
+        <div class="preview-head">
+          <h2 class="sec" style="margin:0">Live preview</h2>
+          <span class="tag" id="previewRowLabel"></span>
+        </div>
+        <div class="preview-stage" id="previewStage"><div id="previewHost" style="color:var(--ink-muted);font-size:13px">Upload a file to see a preview.</div></div>
+      </div>
     </div>
-    <div class="row-flex">
-      <label class="chk"><input type="checkbox" id="letterheadChk" checked> Include bank letterhead</label>
-      <button type="button" class="tbtn ghost" id="btnResetTemplate">Reset template</button>
-    </div>
-  </div>
 
-  <div class="toolbar">
-    <div class="tbgroup">
-      <button type="button" class="tbtn primary" id="btnGenerate" disabled>📄 Generate combined PDF</button>
-      <button type="button" class="tbtn ghost" id="btnPrint" disabled>🖨 Print</button>
-    </div>
   </div>
-
-  <div class="panel">
-    <h2 class="sec">Live preview — first row</h2>
-    <div class="preview-stage" id="previewStage"><div id="previewHost" style="color:var(--ink-muted);font-size:13px">Upload a file to see a preview.</div></div>
-  </div>
-
 </div>
 
 <div id="printArea" style="position:fixed;left:-9999px;top:0;width:800px"></div>
@@ -167,7 +190,7 @@
   'use strict';
   var el = {};
   ['msgBox','dropzone','fileInput','fileStatus','tokenPanel','chipRow','templateText',
-   'letterheadChk','btnResetTemplate','btnGenerate','btnPrint','previewStage','previewHost'
+   'letterheadChk','btnResetTemplate','btnGenerate','btnPrint','previewStage','previewHost','previewRowLabel'
   ].forEach(function(id){ el[id] = document.getElementById(id); });
 
   var TPL_KEY = 'upgb-letter-generator-template';
@@ -328,13 +351,39 @@
   }
   function renderPreview(){
     if(!rows.length){
+      el.previewHost.removeAttribute('style');
       el.previewHost.textContent = 'Upload a file to see a preview.';
       el.previewHost.style.color = 'var(--ink-muted)';
+      el.previewRowLabel.textContent = '';
       return;
     }
     var fields = Object.assign({}, todayFields(), rows[0]);
     el.previewHost.innerHTML = buildLetterHTML(fields, el.letterheadChk.checked);
+    el.previewRowLabel.textContent = 'Row 1 of ' + rows.length.toLocaleString('en-IN');
+    fitPreviewToWidth();
   }
+  // the letter is always rendered at a fixed 800px width (buildLetterHTML),
+  // which is wider than this tool's own sticky preview column -- scale it
+  // down to fit instead of letting it overflow/scroll sideways, and resize
+  // the host box to match so there's no leftover blank space below it.
+  function fitPreviewToWidth(){
+    var child = el.previewHost.firstElementChild;
+    if(!child) return;
+    var naturalW = 800;
+    var availW = el.previewStage.clientWidth - 4;
+    var scale = Math.min(1, availW / naturalW);
+    child.style.transformOrigin = 'top left';
+    child.style.transform = 'scale(' + scale.toFixed(4) + ')';
+    var naturalH = child.scrollHeight;
+    el.previewHost.style.overflow = 'hidden';
+    el.previewHost.style.width = Math.ceil(naturalW * scale) + 'px';
+    el.previewHost.style.height = Math.ceil(naturalH * scale) + 'px';
+  }
+  var fitPreviewTimer = null;
+  window.addEventListener('resize', function(){
+    clearTimeout(fitPreviewTimer);
+    fitPreviewTimer = setTimeout(fitPreviewToWidth, 150);
+  });
 
   // ---------- file loading ----------
   function loadWorkbookRows(allRows){
