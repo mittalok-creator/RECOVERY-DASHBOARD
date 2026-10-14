@@ -1407,24 +1407,38 @@
       beSetProgress((i / pages.length) * 0.7);
       return getPageRealText(entry.srcIdx, entry.pageIdx).then(function(text){
         var hasRealText = text.replace(/\s+/g, '').length >= REAL_TEXT_MIN_CHARS;
-        if(hasRealText) return { text: text, usedOcr: false };
-        beSetStatus(worker ? 'OCR reading page ' + (i + 1) + ' of ' + pages.length + ' (no text layer found)…'
+        var realBranch = hasRealText ? matchBranch(text, branchNames) : null;
+        // Real text is trusted ONLY once it actually matches a branch, not
+        // just because it's long enough to look plausible. Some scanning
+        // apps (e.g. Adobe Scan) embed their OWN OCR text layer, and for
+        // Devanagari it can come out long but garbled/meaningless (a real
+        // "शाखा - पोरा" line was seen coming back as "ATET -", with the
+        // branch name gone entirely) -- that still passes a length check,
+        // but matches nothing real. So a real-text page that doesn't match
+        // any branch is NOT accepted at face value -- it always gets a
+        // second, independent opinion from OCR (reading the actual
+        // rendered pixels, immune to a broken embedded text layer) before
+        // this page is given up on as "no match".
+        if(hasRealText && realBranch) return { text: text, usedOcr: false, triedBoth: false };
+
+        beSetStatus(worker ? 'OCR reading page ' + (i + 1) + ' of ' + pages.length + (hasRealText ? ' (text layer found but no branch matched)…' : ' (no text layer found)…')
                             : 'Starting OCR engine (first use downloads the WASM engine + English/Hindi language data, ~10 MB)…');
         var isPhoto = sources[entry.srcIdx] && sources[entry.srcIdx].kind === 'image';
         var ocrCanvasP = isPhoto ? cleanedPhotoCanvas(entry.srcIdx, entry.pageIdx) : renderPageCanvas(entry.srcIdx, entry.pageIdx, 2.0);
         return (worker ? Promise.resolve(worker) : getOcrWorker().then(function(w){ worker = w; return w; }))
           .then(function(w){
             return ocrCanvasP.then(function(canvas){
-              if(!canvas) return { text: '', usedOcr: true };
+              if(!canvas) return { text: text, usedOcr: true, triedBoth: hasRealText };
               return w.recognize(canvas).then(function(res){
-                return { text: (res && res.data && res.data.text) || '', usedOcr: true };
+                return { text: (res && res.data && res.data.text) || '', usedOcr: true, triedBoth: hasRealText };
               });
             });
           });
       }).then(function(result){
         var branch = matchBranch(result.text, branchNames);
         detections.push({ entry: entry, branch: branch, usedOcr: result.usedOcr });
-        beLogLine('Page ' + (i + 1) + ': ' + (branch ? ('"' + branch + '"') : 'no match') + (result.usedOcr ? ' (OCR)' : ' (text)'));
+        var methodLabel = result.usedOcr ? (result.triedBoth ? 'OCR, text layer unreadable' : 'OCR') : 'text';
+        beLogLine('Page ' + (i + 1) + ': ' + (branch ? ('"' + branch + '"') : 'no match') + ' (' + methodLabel + ')');
         i++;
         return detectNext();
       });
