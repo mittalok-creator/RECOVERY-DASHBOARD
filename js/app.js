@@ -10142,7 +10142,11 @@ window.setDlTab = setDlTab;
 // Alok asked to keep for now ("Abhi k liye keval pass sheet") -- more can
 // be added the same way later, per his own "baaki add-ons baad mein
 // karenge." The other 9 tools' files simply aren't copied into this repo.
-const UTILITY_CHILD_VIEWS = ['passsheet','pdfpagemanager','npadownload','otsapplication','npanotice','letterautomation','emicalculator'];
+// 'emicalculator' (CalcIndia) deliberately left out -- disabled at
+// Alok's request (2026-10-14), revisit later. tools/emi-calculator.html
+// itself is untouched on disk; only its Utility Hub entry point is
+// removed here and in index.html's tile/view-section markup.
+const UTILITY_CHILD_VIEWS = ['passsheet','pdfpagemanager','npadownload','otsapplication','npanotice','letterautomation'];
 /* Screen switches used to be an instant cut -- .view{display:none} has no
    transition of its own, so the outgoing screen just vanished the moment a
    nav item was clicked, then the incoming one popped in a beat later (its
@@ -10163,7 +10167,6 @@ const TOOL_IFRAME_BY_VIEW = {
   passsheet: 'passSheetFrame',
   pdfpagemanager: 'pdfPageManagerFrame',
   letterautomation: 'letterGeneratorFrame',
-  emicalculator: 'emiCalculatorFrame',
 };
 function loadToolIframeIfNeeded(view){
   const frameId = TOOL_IFRAME_BY_VIEW[view];

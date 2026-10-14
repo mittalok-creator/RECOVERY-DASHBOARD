@@ -460,7 +460,7 @@
               <span class="onedrive-page-sub">Every extra tool, kept in one place — grouped so the right one is never far</span>
             </div>
           </div>
-          <span class="utility-hub-count">7 TOOLS</span>
+          <span class="utility-hub-count">6 TOOLS</span>
         </header>
         <label class="utility-search-pill">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -522,6 +522,12 @@
               </button>
             </div>
           </div>
+          <!-- "Calculators" category (CalcIndia) -- disabled at Alok's
+               request (2026-10-14), revisit later. tools/emi-calculator.html
+               itself is untouched on disk; this tile and the matching
+               view section below are just commented out, so re-enabling
+               is a straight uncomment (plus restoring the 'emicalculator'
+               entries in js/app.js's UTILITY_CHILD_VIEWS/TOOL_IFRAME_BY_VIEW).
           <div class="utility-category" data-category="calculators">
             <div class="utility-category-heading utility-cat-mint"><span>Calculators</span><i></i><b>1 tool</b></div>
             <div class="utility-category-cards">
@@ -533,6 +539,7 @@
               </button>
             </div>
           </div>
+          -->
         </div>
         <p class="utility-empty-state" id="utilityEmptyState" hidden>No tools match “<span id="utilityEmptyQuery"></span>”.</p>
       </div>
@@ -656,6 +663,9 @@
       </div>
     </section>
 
+    <!-- CalcIndia view section -- disabled at Alok's request
+         (2026-10-14), revisit later; see the matching comment next to
+         the Utility Hub tile above.
     <section class="view" data-view="emicalculator" id="viewEmiCalculator">
       <div class="tool-page">
         <header class="onedrive-page-head">
@@ -674,6 +684,8 @@
         </div>
       </div>
     </section>
+    -->
+
 
     <!-- NPA Region Summary (Alok's request, 2026-09-10): a standalone
          whole-bank-NPA-file -> Region/Branch-wise KCC + Slippage summary
