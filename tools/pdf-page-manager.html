@@ -34,6 +34,14 @@
      (PyMuPDF for preview, pypdf for the actual edits). -->
 <script src="../js/vendor/pdf.min.js"></script>
 <script src="../js/vendor/pdf-lib.min.js"></script>
+<!-- jszip is only actually USED by Branch Export's ZIP fallback (when the
+     browser has no showDirectoryPicker, or the user skips the folder
+     picker) -- loaded eagerly anyway since it's small and every other tool
+     in this app that needs it (Branch Split) also loads it eagerly rather
+     than lazily. Tesseract.js itself (the much larger OCR engine) is NOT
+     listed here -- see loadTesseractScript() below, which injects it only
+     if/when a page with no real text layer is actually encountered. -->
+<script src="../js/vendor/jszip.min.js"></script>
 <style>
   /* Palette carried over from Alok's own original desktop tool (its own
      BLUE/PALE_BLUE/DARK_BLUE constants) -- same design system token shape
@@ -177,6 +185,25 @@
   .modal-sheet th,.modal-sheet td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line)}
   .modal-sheet .num{font-family:'IBM Plex Mono',monospace}
   .modal-close{float:right;border:none;background:var(--surface-muted);border-radius:7px;padding:5px 10px;cursor:pointer;color:var(--ink)}
+
+  /* ---- Branch Export modal (detects each page's branch via real text or
+     OCR, then writes branch-wise PDFs/JPGs) -- same modal-sheet shell as
+     Diagnostics above, just wider and with real form controls, which this
+     file didn't need before now. ---- */
+  .modal-sheet.wide{max-width:720px}
+  .be-field{margin-bottom:14px}
+  .be-field label{display:block;font-size:12px;font-weight:600;margin-bottom:5px;color:var(--ink)}
+  .be-field textarea{width:100%;min-height:110px;resize:vertical;font-family:'IBM Plex Mono',monospace;font-size:12.5px;line-height:1.6;border:1px solid var(--line);background:var(--surface-muted);color:var(--ink);border-radius:8px;padding:8px 10px}
+  .be-radio-row{display:flex;gap:16px;flex-wrap:wrap}
+  .be-radio-row label{display:flex;align-items:center;gap:6px;font-size:12.8px;font-weight:500;cursor:pointer}
+  .be-folder-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .be-hint{font-size:11.5px;color:var(--ink-muted);margin:4px 0 0}
+  .be-actions{display:flex;gap:8px;margin-top:4px}
+  .be-progress-wrap{margin-top:12px}
+  .be-progress-track{height:7px;border-radius:4px;background:var(--surface-muted);overflow:hidden}
+  .be-progress-fill{height:100%;width:0%;background:var(--accent);transition:width .15s}
+  .be-status{font-size:12px;color:var(--ink-muted);margin-top:6px}
+  .be-log{margin-top:8px;max-height:160px;overflow:auto;background:var(--surface-muted);border-radius:8px;padding:8px 10px;font-family:'IBM Plex Mono',monospace;font-size:11px;white-space:pre-wrap;color:var(--ink-muted)}
 </style>
 </head>
 <body>
@@ -197,6 +224,7 @@
       <button type="button" class="tbtn" id="btnAdd" disabled title="Add selected pages from another PDF or image">➕ Add Pages</button>
       <button type="button" class="tbtn" id="btnMerge" disabled title="Append/replace with another PDF or image">🔗 Merge PDFs</button>
       <button type="button" class="tbtn" id="btnImagesToPdf" title="Import one or more images and build a PDF from them">🖼️ Images → PDF</button>
+      <button type="button" class="tbtn" id="btnBranchExport" disabled title="Detect each page's branch name and export branch-wise PDFs or JPGs">🏷️ Branch Export</button>
     </div>
     <div class="tbgroup">
       <button type="button" class="tbtn" id="btnRotL" disabled>↶ Rotate</button>
@@ -261,6 +289,45 @@
 
 <div class="toast" id="toast"></div>
 <div class="modal-overlay" id="diagOverlay" style="display:none"></div>
+<div class="modal-overlay" id="branchExportOverlay" style="display:none">
+  <div class="modal-sheet wide">
+    <button type="button" class="modal-close" id="beClose">Close</button>
+    <h3>Branch-wise Export</h3>
+    <p class="be-hint">Reads every page currently in the strip above, detects which branch it belongs to (Hindi or English name), then saves either one combined PDF per branch or a JPG per page named with its branch. Real text is read first; pages with no text layer (like this app's own NPA Notice / Application Form / Universal Letter Generator output, or a photographed letter) fall back to on-device OCR. Nothing leaves this browser tab.</p>
+
+    <div class="be-field">
+      <label for="beBranchList">Branch names (one per line, Hindi or English spelling — matched against each page's text)</label>
+      <textarea id="beBranchList" placeholder="Agsauli&#10;पोरा&#10;Ronchi Bangar&#10;सिकंदराराऊ"></textarea>
+    </div>
+
+    <div class="be-field">
+      <label>Output format</label>
+      <div class="be-radio-row">
+        <label><input type="radio" name="beFormat" id="beFormatPdf" value="pdf" checked> Branch-wise PDF (one combined PDF per branch)</label>
+        <label><input type="radio" name="beFormat" id="beFormatJpg" value="jpg"> JPG images (flat folder, branch name in filename)</label>
+      </div>
+    </div>
+
+    <div class="be-field">
+      <label>Save to</label>
+      <div class="be-folder-row">
+        <button type="button" class="btn-ghost" id="beFolderBtn">Choose desired folder…</button>
+        <span class="be-hint" id="beFolderLabel" style="margin:0">No folder chosen — a ZIP will be downloaded instead.</span>
+      </div>
+    </div>
+
+    <div class="be-actions">
+      <button type="button" class="tbtn primary" id="beRun">Start</button>
+      <button type="button" class="tbtn" id="beCancel" disabled>Cancel</button>
+    </div>
+
+    <div class="be-progress-wrap" id="beProgressWrap" style="display:none">
+      <div class="be-progress-track"><div class="be-progress-fill" id="beProgressFill"></div></div>
+      <div class="be-status" id="beStatus"></div>
+      <div class="be-log" id="beLog"></div>
+    </div>
+  </div>
+</div>
 
 <script>
 (function(){
@@ -285,7 +352,9 @@
   ['msgBox','dropzone','fileInput','btnOpen','btnAdd','btnMerge','btnImagesToPdf','btnRotL','btnRotR','btnDup',
    'btnRemove','btnReverse','btnExtract','btnUndo','btnRedo','btnSave','btnShare','btnClear','countChip',
    'statusText','searchInput','btnFind','btnSelectAll','grid','previewTitle','zoomRange',
-   'zoomMinus','zoomPlus','zoomFit','previewStage','btnDiag','toast','diagOverlay'
+   'zoomMinus','zoomPlus','zoomFit','previewStage','btnDiag','toast','diagOverlay',
+   'btnBranchExport','branchExportOverlay','beClose','beBranchList','beFormatPdf','beFormatJpg',
+   'beFolderBtn','beFolderLabel','beRun','beCancel','beProgressWrap','beProgressFill','beStatus','beLog'
   ].forEach(function(id){ el[id] = document.getElementById(id); });
 
   function toast(msg){
@@ -685,7 +754,7 @@
       : (pages.length ? 'Click a page to select it.' : 'Open a PDF to begin.');
 
     var hasPages = pages.length > 0;
-    [el.btnExtract, el.btnSave, el.btnShare, el.btnClear, el.btnSelectAll, el.btnDiag, el.btnAdd, el.btnMerge]
+    [el.btnExtract, el.btnSave, el.btnShare, el.btnClear, el.btnSelectAll, el.btnDiag, el.btnAdd, el.btnMerge, el.btnBranchExport]
       .forEach(function(b){ b.disabled = !hasPages; });
     var hasSel = selected.size > 0;
     [el.btnRotL, el.btnRotR, el.btnDup, el.btnRemove, el.btnReverse].forEach(function(b){ b.disabled = !hasSel && b !== el.btnReverse; });
@@ -775,6 +844,69 @@
               var src = sources[si];
               var embed = src.mime === 'image/png' ? outDoc.embedPng(src.bytes) : outDoc.embedJpg(src.bytes);
               return embed.then(function(img){ embedded[si] = img; });
+            });
+          }, Promise.resolve());
+
+          return embedChain.then(function(){
+            var chain = Promise.resolve();
+            entries.forEach(function(entry){
+              chain = chain.then(function(){
+                var src = sources[entry.srcIdx];
+                if(src.kind === 'image'){
+                  var img = embedded[entry.srcIdx];
+                  var page = outDoc.addPage([img.width, img.height]);
+                  page.drawImage(img, { x:0, y:0, width:img.width, height:img.height });
+                  if(entry.rotation) page.setRotation(PDFLib.degrees(entry.rotation % 360));
+                  return;
+                }
+                return outDoc.copyPages(bySrc[entry.srcIdx], [entry.pageIdx]).then(function(copied){
+                  var cp = copied[0];
+                  if(entry.rotation){
+                    var base = cp.getRotation().angle || 0;
+                    cp.setRotation(PDFLib.degrees((base + entry.rotation) % 360));
+                  }
+                  outDoc.addPage(cp);
+                });
+              });
+            });
+            return chain.then(function(){ return outDoc.save(); });
+          });
+        });
+      });
+  }
+
+  // Same shape as buildOutputBytes above, but for Branch Export's PDF
+  // output: any IMAGE-kind entry (a photographed letter, not a real PDF
+  // page) is first run through the autocrop + clarity pass -- cropping the
+  // desk/background margin and sharpening contrast -- and the CLEANED
+  // result is what gets embedded, instead of a raw, unedited copy of
+  // whatever the camera originally captured. Real PDF pages are still
+  // copied as true vector pages (untouched, already lossless) exactly as
+  // buildOutputBytes does.
+  function buildBranchPdfBytes(entries){
+    var uniqueSrcIdx = Array.from(new Set(entries.map(function(e){ return e.srcIdx; })));
+    var pdfSrcIdx = uniqueSrcIdx.filter(function(si){ return sources[si].kind !== 'image'; });
+    var imgSrcIdx = uniqueSrcIdx.filter(function(si){ return sources[si].kind === 'image'; });
+
+    return Promise.all(pdfSrcIdx.map(function(si){ return PDFLib.PDFDocument.load(sources[si].bytes); }))
+      .then(function(libDocs){
+        var bySrc = {};
+        pdfSrcIdx.forEach(function(si, k){ bySrc[si] = libDocs[k]; });
+
+        return PDFLib.PDFDocument.create().then(function(outDoc){
+          var embedded = {};
+          var embedChain = imgSrcIdx.reduce(function(chain, si){
+            return chain.then(function(){
+              return cleanedPhotoCanvas(si, 0).then(function(canvas){
+                if(!canvas){
+                  // Cropping/enhancement failed for some reason -- fall
+                  // back to embedding the original, unedited photo rather
+                  // than dropping the page.
+                  return sources[si].mime === 'image/png' ? outDoc.embedPng(sources[si].bytes) : outDoc.embedJpg(sources[si].bytes);
+                }
+                return canvasToJpegBlob(canvas, 0.95).then(function(blob){ return blob.arrayBuffer(); })
+                  .then(function(buf){ return outDoc.embedJpg(new Uint8Array(buf)); });
+              }).then(function(img){ embedded[si] = img; });
             });
           }, Promise.resolve());
 
@@ -964,6 +1096,443 @@
   }
   el.diagOverlay.addEventListener('click', function(e){ if(e.target === el.diagOverlay) el.diagOverlay.style.display = 'none'; });
   el.btnDiag.addEventListener('click', showDiagnostics);
+
+  // ---------- Branch Export (detect each page's branch, save branch-wise PDFs/JPGs) ----------
+  // Works directly on the SAME pages/sources state as everything else in
+  // this tool -- whatever is currently in the page strip (opened via Open/
+  // Add/Merge/Images->PDF, in whatever order/rotation the user has already
+  // arranged) is exactly what gets scanned and exported. No separate
+  // upload step.
+  var beFsaSupported = 'showDirectoryPicker' in window;
+  var beDirHandle = null;
+  var beCancelRequested = false;
+  var beRunning = false;
+  var tesseractScriptPromise = null;
+  var ocrWorkerPromise = null;
+  var REAL_TEXT_MIN_CHARS = 15;
+
+  if(!beFsaSupported){
+    el.beFolderBtn.hidden = true;
+    el.beFolderLabel.textContent = 'Your browser will bundle every output file into one ZIP to download.';
+  }
+
+  // Tesseract.js itself (~70 KB) plus its WASM OCR core (~4 MB) and
+  // eng+hin language data (~3 MB gzipped) are NOT loaded until a page with
+  // no usable real text layer is actually hit -- most sessions that only
+  // ever handle genuinely text-based PDFs never pay this cost at all.
+  function loadTesseractScript(){
+    if(window.Tesseract) return Promise.resolve();
+    if(tesseractScriptPromise) return tesseractScriptPromise;
+    tesseractScriptPromise = new Promise(function(resolve, reject){
+      var s = document.createElement('script');
+      s.src = '../js/vendor/tesseract.min.js';
+      s.onload = function(){ resolve(); };
+      s.onerror = function(){ tesseractScriptPromise = null; reject(new Error('Could not load the OCR engine (tesseract.min.js).')); };
+      document.head.appendChild(s);
+    });
+    return tesseractScriptPromise;
+  }
+
+  // One shared worker per run, reused across every page that needs OCR
+  // (creating a fresh worker per page would re-download/re-init the WASM
+  // core and language data every single time). lstmOnly is forced via OEM
+  // so this only ever requests the two core files this app actually
+  // vendors (tesseract-core-lstm.wasm.js / tesseract-core-simd-lstm.wasm.js)
+  // -- see js/vendor/tesseract-core/.
+  function getOcrWorker(){
+    if(ocrWorkerPromise) return ocrWorkerPromise;
+    ocrWorkerPromise = loadTesseractScript().then(function(){
+      return Tesseract.createWorker(['eng', 'hin'], Tesseract.OEM.LSTM_ONLY, {
+        workerPath: '../js/vendor/tesseract-worker.min.js',
+        corePath: '../js/vendor/tesseract-core',
+        langPath: '../js/vendor/tessdata'
+      });
+    }).catch(function(err){ ocrWorkerPromise = null; throw err; });
+    return ocrWorkerPromise;
+  }
+
+  // Real text layer first -- this app's OWN generated letters (NPA Notice,
+  // Application Form, Universal Letter Generator) are html2canvas
+  // rasterizations with NO text layer at all, so this always comes back
+  // empty for them and OCR picks up the work below; a genuinely text-based
+  // PDF the user opens instead skips OCR entirely, which is both faster
+  // and more accurate than OCR would be.
+  function getPageRealText(srcIdx, pageIdx){
+    var src = sources[srcIdx];
+    if(!src || src.kind === 'image' || !src.pdfjsDoc) return Promise.resolve('');
+    return src.pdfjsDoc.getPage(pageIdx + 1).then(function(page){
+      return page.getTextContent();
+    }).then(function(content){
+      return (content.items || []).map(function(it){ return it.str; }).join(' ');
+    }).catch(function(){ return ''; });
+  }
+
+  // ---- quality pipeline for a photographed letter (an 'image' source,
+  // e.g. a phone photo like the user's real "Pora" sample) --------------
+  // A camera photo usually has a visible desk/background margin around the
+  // actual letter, and is slightly soft/low-contrast compared to a clean
+  // scan. Neither of those is something a higher render SCALE can fix --
+  // stretching a photo past its own native pixels only blurs it further
+  // ("fatna" on zoom) -- so native resolution is kept here, and instead:
+  // (1) autoCropToContent trims the uniform background margin down to the
+  //     actual document, and (2) enhanceForClarity pushes contrast so the
+  //     text reads cleanly. Deliberately NOT attempted here: correcting an
+  //     arbitrarily tilted/skewed photo (true perspective deskew) -- that
+  //     is a much bigger computer-vision feature on its own; for a
+  //     sideways page the existing Rotate (90°) buttons in the page strip,
+  //     used before running Branch Export, cover the common case.
+  // A real desk/background behind a photographed letter (wood grain, a
+  // keyboard, a binder clip) is often JUST AS textured as the paper itself
+  // -- a plain "is this strip flat/uniform" check can't tell them apart.
+  // What reliably CAN: white A4/letter paper is almost always the single
+  // brightest, largest contiguous thing in the frame. So this: (1) finds
+  // Otsu's threshold (the brightness cut that best splits the photo into
+  // a dark group and a light group -- adapts to whatever lighting the
+  // photo has, no hard-coded brightness number), (2) flood-fills to find
+  // the single LARGEST connected region brighter than that cut (the page
+  // itself -- scattered small bright bits like keyboard key-labels lose
+  // out to the page's one big contiguous blob), (3) crops to that region's
+  // bounding box, with a margin. Runs on a small downscaled copy purely
+  // for speed; the crop box is then mapped back to full resolution so the
+  // OUTPUT stays native-resolution.
+  function autoCropToContent(canvas){
+    var w = canvas.width, h = canvas.height;
+    if(w < 20 || h < 20) return canvas;
+    var targetLong = 260;
+    var scale = targetLong / Math.max(w, h);
+    var gw = Math.max(8, Math.round(w * scale)), gh = Math.max(8, Math.round(h * scale));
+    var small = document.createElement('canvas');
+    small.width = gw; small.height = gh;
+    var sctx = small.getContext('2d');
+    sctx.drawImage(canvas, 0, 0, gw, gh);
+    var data;
+    try{ data = sctx.getImageData(0, 0, gw, gh).data; }catch(e){ return canvas; }
+
+    var n = gw * gh;
+    var lum = new Uint8ClampedArray(n);
+    var hist = new Array(256).fill(0);
+    for(var p = 0; p < n; p++){
+      var i4 = p * 4;
+      var l = Math.round(0.299*data[i4] + 0.587*data[i4+1] + 0.114*data[i4+2]);
+      lum[p] = l; hist[l]++;
+    }
+    // Otsu's method: the threshold that maximises between-class variance.
+    var total = n, sumAll = 0;
+    for(var t = 0; t < 256; t++) sumAll += t * hist[t];
+    var sumB = 0, wB = 0, maxVar = -1, threshold = 127;
+    for(var t2 = 0; t2 < 256; t2++){
+      wB += hist[t2];
+      if(wB === 0) continue;
+      var wF = total - wB;
+      if(wF === 0) break;
+      sumB += t2 * hist[t2];
+      var mB = sumB / wB, mF = (sumAll - sumB) / wF;
+      var varBetween = wB * wF * (mB - mF) * (mB - mF);
+      if(varBetween > maxVar){ maxVar = varBetween; threshold = t2; }
+    }
+
+    var mask = new Uint8Array(n);
+    for(var p2 = 0; p2 < n; p2++) mask[p2] = lum[p2] > threshold ? 1 : 0;
+
+    // Largest 4-connected bright component (explicit stack, no recursion).
+    var visited = new Uint8Array(n);
+    var bestMinX = 0, bestMaxX = 0, bestMinY = 0, bestMaxY = 0, bestSize = 0;
+    var stack = [];
+    for(var y0 = 0; y0 < gh; y0++){
+      for(var x0 = 0; x0 < gw; x0++){
+        var start = y0 * gw + x0;
+        if(!mask[start] || visited[start]) continue;
+        var minX = x0, maxX = x0, minY = y0, maxY = y0, size = 0;
+        stack.length = 0; stack.push(start); visited[start] = 1;
+        while(stack.length){
+          var idx = stack.pop();
+          var y = (idx / gw) | 0, x = idx - y * gw;
+          size++;
+          if(x < minX) minX = x; if(x > maxX) maxX = x;
+          if(y < minY) minY = y; if(y > maxY) maxY = y;
+          if(x > 0 && mask[idx-1] && !visited[idx-1]){ visited[idx-1]=1; stack.push(idx-1); }
+          if(x < gw-1 && mask[idx+1] && !visited[idx+1]){ visited[idx+1]=1; stack.push(idx+1); }
+          if(y > 0 && mask[idx-gw] && !visited[idx-gw]){ visited[idx-gw]=1; stack.push(idx-gw); }
+          if(y < gh-1 && mask[idx+gw] && !visited[idx+gw]){ visited[idx+gw]=1; stack.push(idx+gw); }
+        }
+        if(size > bestSize){ bestSize = size; bestMinX = minX; bestMaxX = maxX; bestMinY = minY; bestMaxY = maxY; }
+      }
+    }
+    if(!bestSize) return canvas;
+
+    var boxW = bestMaxX - bestMinX + 1, boxH = bestMaxY - bestMinY + 1;
+    var fillFrac = bestSize / (boxW * boxH);
+    // Bail out to the untouched canvas if the detected region looks
+    // implausible as "the page" -- too small/sparse/sliver-shaped, or
+    // basically the whole frame already (nothing to crop) -- rather than
+    // risk cropping real content off a letter this heuristic misread.
+    if(bestSize < n * 0.12 || fillFrac < 0.35 || boxW < gw * 0.25 || boxH < gh * 0.25) return canvas;
+    if(boxW >= gw - 1 && boxH >= gh - 1) return canvas;
+
+    var marginFrac = 0.015, fx = w / gw, fy = h / gh;
+    var left = Math.max(0, Math.floor((bestMinX - gw * marginFrac) * fx));
+    var top = Math.max(0, Math.floor((bestMinY - gh * marginFrac) * fy));
+    var right = Math.min(w, Math.ceil((bestMaxX + 1 + gw * marginFrac) * fx));
+    var bottom = Math.min(h, Math.ceil((bestMaxY + 1 + gh * marginFrac) * fy));
+    var cw = right - left, ch = bottom - top;
+    if(cw < w * 0.25 || ch < h * 0.25) return canvas;
+
+    var out = document.createElement('canvas');
+    out.width = cw; out.height = ch;
+    out.getContext('2d').drawImage(canvas, left, top, cw, ch, 0, 0, cw, ch);
+    return out;
+  }
+
+  // Gentle contrast/brightness stretch, not a hard threshold -- keeps
+  // signatures/stamps/photos on the letter intact while making body text
+  // noticeably crisper against the page background.
+  function enhanceForClarity(canvas){
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width, h = canvas.height;
+    var imgData;
+    try{ imgData = ctx.getImageData(0, 0, w, h); }catch(e){ return canvas; }
+    var d = imgData.data, contrast = 1.18, brightnessShift = 6;
+    for(var i = 0; i < d.length; i += 4){
+      for(var c = 0; c < 3; c++){
+        var v = (d[i+c] - 128) * contrast + 128 + brightnessShift;
+        d[i+c] = v < 0 ? 0 : (v > 255 ? 255 : v);
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+    return canvas;
+  }
+  function cleanedPhotoCanvas(srcIdx, pageIdx){
+    return renderPageCanvas(srcIdx, pageIdx, 1).then(function(canvas){
+      if(!canvas) return null;
+      return enhanceForClarity(autoCropToContent(canvas));
+    });
+  }
+
+  // Physically bakes a rotation delta into a new canvas -- the CSS
+  // transform used for the on-screen thumbnail/preview only affects
+  // display, never the actual pixels, so export needs the real pixels
+  // rotated or the saved file comes out sideways.
+  function rotateCanvas(canvas, rotation){
+    rotation = ((rotation % 360) + 360) % 360;
+    if(rotation === 0) return canvas;
+    var out = document.createElement('canvas');
+    var swapped = (rotation === 90 || rotation === 270);
+    out.width = swapped ? canvas.height : canvas.width;
+    out.height = swapped ? canvas.width : canvas.height;
+    var ctx = out.getContext('2d');
+    ctx.translate(out.width / 2, out.height / 2);
+    ctx.rotate(rotation * Math.PI / 180);
+    ctx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
+    return out;
+  }
+
+  // HD export render, branching by source kind: a photographed letter
+  // ('image') is already at its own fixed native resolution -- rendering
+  // it any larger only blurs it further on zoom, so this crops+cleans it
+  // (see cleanedPhotoCanvas) and otherwise leaves the resolution alone. A
+  // PDF-rendered page has no such ceiling -- pdf.js re-draws the real page
+  // content at whatever scale is asked, vector-crisp -- so this renders it
+  // at EXPORT_PDF_SCALE for genuinely higher-DPI output that holds up when
+  // zoomed in, rather than reusing the small scale used for on-screen thumbs.
+  var EXPORT_PDF_SCALE = 3.0;
+  function getExportCanvas(srcIdx, pageIdx, rotation){
+    var src = sources[srcIdx];
+    var base = (src && src.kind === 'image')
+      ? cleanedPhotoCanvas(srcIdx, pageIdx)
+      : renderPageCanvas(srcIdx, pageIdx, EXPORT_PDF_SCALE);
+    return base.then(function(canvas){ return canvas ? rotateCanvas(canvas, rotation) : null; });
+  }
+  function canvasToJpegBlob(canvas, quality){
+    return new Promise(function(resolve){ canvas.toBlob(resolve, 'image/jpeg', quality); });
+  }
+
+  // Case-insensitive substring match, checked in the order the user typed
+  // the branch list -- works identically for Hindi and English spellings
+  // since neither has a case distinction to normalize away.
+  function matchBranch(text, branchNames){
+    var hay = (text || '').toLowerCase();
+    for(var i = 0; i < branchNames.length; i++){
+      var name = branchNames[i].toLowerCase();
+      if(name && hay.indexOf(name) !== -1) return branchNames[i];
+    }
+    return null;
+  }
+  function sanitizeFilePart(s){ return String(s).trim().replace(/[\\/:*?"<>|]/g, '_'); }
+
+  function beLogLine(line){ el.beLog.textContent += line + '\n'; el.beLog.scrollTop = el.beLog.scrollHeight; }
+  function beSetStatus(text){ el.beStatus.textContent = text; }
+  function beSetProgress(frac){ el.beProgressFill.style.width = Math.round(frac * 100) + '%'; }
+
+  function openBranchExportModal(){
+    if(!pages.length) return;
+    el.branchExportOverlay.style.display = 'flex';
+  }
+  function closeBranchExportModal(){
+    if(beRunning) return; // don't let Close abandon a mid-run export silently
+    el.branchExportOverlay.style.display = 'none';
+  }
+  el.btnBranchExport.addEventListener('click', openBranchExportModal);
+  el.beClose.addEventListener('click', closeBranchExportModal);
+  el.branchExportOverlay.addEventListener('click', function(e){ if(e.target === el.branchExportOverlay) closeBranchExportModal(); });
+
+  el.beFolderBtn.addEventListener('click', function(){
+    (window.showDirectoryPicker ? window.showDirectoryPicker() : Promise.reject())
+      .then(function(handle){
+        beDirHandle = handle;
+        el.beFolderLabel.textContent = 'Saving to: ' + handle.name;
+      })
+      .catch(function(){ /* user cancelled the picker -- leave prior selection, if any */ });
+  });
+
+  function writeOutputFile(filename, bytesOrBlob, zip){
+    if(beFsaSupported && beDirHandle){
+      return beDirHandle.getFileHandle(filename, {create: true}).then(function(fh){
+        return fh.createWritable().then(function(w){
+          return w.write(bytesOrBlob).then(function(){ return w.close(); });
+        });
+      });
+    }
+    zip.file(filename, bytesOrBlob);
+    return Promise.resolve();
+  }
+
+  function runBranchExport(){
+    if(beRunning) return;
+    var branchNames = el.beBranchList.value.split('\n').map(function(s){ return s.trim(); }).filter(Boolean);
+    if(!branchNames.length){ beSetStatus('Enter at least one branch name, one per line.'); return; }
+    var format = el.beFormatJpg.checked ? 'jpg' : 'pdf';
+
+    beRunning = true; beCancelRequested = false;
+    el.beRun.disabled = true; el.beCancel.disabled = false;
+    el.beProgressWrap.style.display = 'block';
+    el.beLog.textContent = '';
+    beSetProgress(0);
+
+    var zip = (beFsaSupported && beDirHandle) ? null : new JSZip();
+    var detections = []; // {entry, branch:string|null, usedOcr}
+    var worker = null;
+
+    // Pass 1: detect every page's branch, real text first, OCR fallback --
+    // sequential (not Promise.all) since OCR is CPU-heavy and a single
+    // shared worker can only run one recognize() at a time anyway.
+    var i = 0;
+    function detectNext(){
+      if(beCancelRequested || i >= pages.length) return Promise.resolve();
+      var entry = pages[i];
+      beSetStatus('Reading page ' + (i + 1) + ' of ' + pages.length + '…');
+      beSetProgress((i / pages.length) * 0.7);
+      return getPageRealText(entry.srcIdx, entry.pageIdx).then(function(text){
+        var hasRealText = text.replace(/\s+/g, '').length >= REAL_TEXT_MIN_CHARS;
+        if(hasRealText) return { text: text, usedOcr: false };
+        beSetStatus(worker ? 'OCR reading page ' + (i + 1) + ' of ' + pages.length + ' (no text layer found)…'
+                            : 'Starting OCR engine (first use downloads the WASM engine + English/Hindi language data, ~10 MB)…');
+        var isPhoto = sources[entry.srcIdx] && sources[entry.srcIdx].kind === 'image';
+        var ocrCanvasP = isPhoto ? cleanedPhotoCanvas(entry.srcIdx, entry.pageIdx) : renderPageCanvas(entry.srcIdx, entry.pageIdx, 2.0);
+        return (worker ? Promise.resolve(worker) : getOcrWorker().then(function(w){ worker = w; return w; }))
+          .then(function(w){
+            return ocrCanvasP.then(function(canvas){
+              if(!canvas) return { text: '', usedOcr: true };
+              return w.recognize(canvas).then(function(res){
+                return { text: (res && res.data && res.data.text) || '', usedOcr: true };
+              });
+            });
+          });
+      }).then(function(result){
+        var branch = matchBranch(result.text, branchNames);
+        detections.push({ entry: entry, branch: branch, usedOcr: result.usedOcr });
+        beLogLine('Page ' + (i + 1) + ': ' + (branch ? ('"' + branch + '"') : 'no match') + (result.usedOcr ? ' (OCR)' : ' (text)'));
+        i++;
+        return detectNext();
+      });
+    }
+
+    detectNext().then(function(){
+      return worker ? worker.terminate().catch(function(){}) : null;
+    }).then(function(){
+      if(beCancelRequested){
+        beSetStatus('Cancelled after detecting ' + detections.length + ' of ' + pages.length + ' page(s).');
+        el.beRun.disabled = false; el.beCancel.disabled = true; beRunning = false;
+        return;
+      }
+
+      // Group by branch -- unmatched pages go under "Unmatched" so nothing
+      // is silently dropped; the user can see at a glance what the tool
+      // couldn't recognise and re-run with a corrected branch list.
+      var groups = {}, order = [];
+      detections.forEach(function(d){
+        var key = d.branch || 'Unmatched';
+        if(!groups[key]){ groups[key] = []; order.push(key); }
+        groups[key].push(d.entry);
+      });
+
+      beSetStatus('Writing output files…');
+      var filesWritten = 0;
+      var writeChain = Promise.resolve();
+
+      if(format === 'pdf'){
+        order.forEach(function(branchName, g){
+          writeChain = writeChain.then(function(){
+            if(beCancelRequested) return;
+            beSetProgress(0.7 + (g / order.length) * 0.3);
+            var branchEntries = groups[branchName];
+            return buildBranchPdfBytes(branchEntries).then(function(bytes){
+              var fname = sanitizeFilePart(branchName) + '.pdf';
+              return writeOutputFile(fname, bytes, zip).then(function(){
+                filesWritten++;
+                beLogLine('Wrote ' + fname + ' (' + branchEntries.length + ' page(s))');
+              });
+            });
+          });
+        });
+      } else {
+        var gi = 0, total = detections.length;
+        order.forEach(function(branchName){
+          groups[branchName].forEach(function(pageEntry, k){
+            writeChain = writeChain.then(function(){
+              if(beCancelRequested) return;
+              beSetProgress(0.7 + (gi / total) * 0.3); gi++;
+              return getExportCanvas(pageEntry.srcIdx, pageEntry.pageIdx, pageEntry.rotation).then(function(canvas){
+                if(!canvas) return;
+                return canvasToJpegBlob(canvas, 0.95).then(function(blob){
+                  var jname = sanitizeFilePart(branchName) + '_' + (k + 1) + '.jpg';
+                  return writeOutputFile(jname, blob, zip).then(function(){
+                    filesWritten++;
+                    beLogLine('Wrote ' + jname);
+                  });
+                });
+              });
+            });
+          });
+        });
+      }
+
+      writeChain.then(function(){
+        if(zip && !beCancelRequested && filesWritten > 0){
+          beSetStatus('Building ZIP…');
+          return zip.generateAsync({type: 'blob'}).then(function(zipBlob){
+            anchorDownload(zipBlob, 'Branch_Export_' + dateStamp() + '.zip');
+          });
+        }
+      }).then(function(){
+        el.beRun.disabled = false; el.beCancel.disabled = true; beRunning = false;
+        if(beCancelRequested){
+          beSetStatus('Cancelled. ' + filesWritten + ' file(s) written before stopping.');
+        } else {
+          beSetStatus('Done. ' + filesWritten + ' file(s) across ' + order.length + ' branch(es)' +
+            (groups['Unmatched'] ? ' (including "Unmatched")' : '') + '.');
+          toast('Branch export complete');
+        }
+      }).catch(function(err){
+        el.beRun.disabled = false; el.beCancel.disabled = true; beRunning = false;
+        beSetStatus('Export failed: ' + (err && err.message || err));
+      });
+    }).catch(function(err){
+      el.beRun.disabled = false; el.beCancel.disabled = true; beRunning = false;
+      beSetStatus('Detection failed: ' + (err && err.message || err));
+    });
+  }
+  el.beRun.addEventListener('click', runBranchExport);
+  el.beCancel.addEventListener('click', function(){ beCancelRequested = true; });
 
   // ---------- keyboard shortcuts (same set as the original desktop app) ----------
   document.addEventListener('keydown', function(e){
