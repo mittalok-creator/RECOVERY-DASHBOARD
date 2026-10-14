@@ -823,13 +823,32 @@
   el.btnFind.addEventListener('click', doSearch);
   el.searchInput.addEventListener('keydown', function(e){ if(e.key === 'Enter') doSearch(); });
 
-  // ---------- build output (shared by Save & Verify / Extract / Share) ----------
-  function buildOutputBytes(entries){
+  // ---------- build output (shared by Save & Verify / Extract / Share, and
+  // by Branch Export's PDF output below) ----------
+  // entries -> PDF bytes, with an injectable embedImageFn(outDoc, srcIdx)
+  // for how an IMAGE-kind source gets embedded -- the one thing Branch
+  // Export's PDF output needs to do differently (crop/enhance a
+  // photographed letter before embedding it; see buildBranchPdfBytes
+  // below). Real PDF-sourced pages are always copied as true vector pages
+  // (untouched, lossless) regardless of which caller this is.
+  // docCache is optional: when the SAME call site builds several output
+  // PDFs back-to-back from one shared pool of sources (Branch Export
+  // builds one PDF per branch, but a single multi-page source PDF can
+  // supply pages to many different branches), passing one plain object in
+  // across those calls avoids re-parsing the same source PDF bytes with
+  // PDFLib.PDFDocument.load() once per branch.
+  function buildPdfFromEntriesCore(entries, embedImageFn, docCache){
     var uniqueSrcIdx = Array.from(new Set(entries.map(function(e){ return e.srcIdx; })));
     var pdfSrcIdx = uniqueSrcIdx.filter(function(si){ return sources[si].kind !== 'image'; });
     var imgSrcIdx = uniqueSrcIdx.filter(function(si){ return sources[si].kind === 'image'; });
 
-    return Promise.all(pdfSrcIdx.map(function(si){ return PDFLib.PDFDocument.load(sources[si].bytes); }))
+    function loadPdfLibDoc(si){
+      if(!docCache) return PDFLib.PDFDocument.load(sources[si].bytes);
+      if(!docCache[si]) docCache[si] = PDFLib.PDFDocument.load(sources[si].bytes);
+      return docCache[si];
+    }
+
+    return Promise.all(pdfSrcIdx.map(loadPdfLibDoc))
       .then(function(libDocs){
         var bySrc = {};
         pdfSrcIdx.forEach(function(si, k){ bySrc[si] = libDocs[k]; });
@@ -841,9 +860,7 @@
           // re-embedding per occurrence would waste work and bloat output.
           var embedChain = imgSrcIdx.reduce(function(chain, si){
             return chain.then(function(){
-              var src = sources[si];
-              var embed = src.mime === 'image/png' ? outDoc.embedPng(src.bytes) : outDoc.embedJpg(src.bytes);
-              return embed.then(function(img){ embedded[si] = img; });
+              return embedImageFn(outDoc, si).then(function(img){ embedded[si] = img; });
             });
           }, Promise.resolve());
 
@@ -875,67 +892,28 @@
       });
   }
 
-  // Same shape as buildOutputBytes above, but for Branch Export's PDF
-  // output: any IMAGE-kind entry (a photographed letter, not a real PDF
-  // page) is first run through the autocrop + clarity pass -- cropping the
-  // desk/background margin and sharpening contrast -- and the CLEANED
-  // result is what gets embedded, instead of a raw, unedited copy of
-  // whatever the camera originally captured. Real PDF pages are still
-  // copied as true vector pages (untouched, already lossless) exactly as
-  // buildOutputBytes does.
-  function buildBranchPdfBytes(entries){
-    var uniqueSrcIdx = Array.from(new Set(entries.map(function(e){ return e.srcIdx; })));
-    var pdfSrcIdx = uniqueSrcIdx.filter(function(si){ return sources[si].kind !== 'image'; });
-    var imgSrcIdx = uniqueSrcIdx.filter(function(si){ return sources[si].kind === 'image'; });
+  function rawEmbedImage(outDoc, si){
+    var src = sources[si];
+    return src.mime === 'image/png' ? outDoc.embedPng(src.bytes) : outDoc.embedJpg(src.bytes);
+  }
+  function buildOutputBytes(entries){
+    return buildPdfFromEntriesCore(entries, rawEmbedImage);
+  }
 
-    return Promise.all(pdfSrcIdx.map(function(si){ return PDFLib.PDFDocument.load(sources[si].bytes); }))
-      .then(function(libDocs){
-        var bySrc = {};
-        pdfSrcIdx.forEach(function(si, k){ bySrc[si] = libDocs[k]; });
-
-        return PDFLib.PDFDocument.create().then(function(outDoc){
-          var embedded = {};
-          var embedChain = imgSrcIdx.reduce(function(chain, si){
-            return chain.then(function(){
-              return cleanedPhotoCanvas(si, 0).then(function(canvas){
-                if(!canvas){
-                  // Cropping/enhancement failed for some reason -- fall
-                  // back to embedding the original, unedited photo rather
-                  // than dropping the page.
-                  return sources[si].mime === 'image/png' ? outDoc.embedPng(sources[si].bytes) : outDoc.embedJpg(sources[si].bytes);
-                }
-                return canvasToJpegBlob(canvas, 0.95).then(function(blob){ return blob.arrayBuffer(); })
-                  .then(function(buf){ return outDoc.embedJpg(new Uint8Array(buf)); });
-              }).then(function(img){ embedded[si] = img; });
-            });
-          }, Promise.resolve());
-
-          return embedChain.then(function(){
-            var chain = Promise.resolve();
-            entries.forEach(function(entry){
-              chain = chain.then(function(){
-                var src = sources[entry.srcIdx];
-                if(src.kind === 'image'){
-                  var img = embedded[entry.srcIdx];
-                  var page = outDoc.addPage([img.width, img.height]);
-                  page.drawImage(img, { x:0, y:0, width:img.width, height:img.height });
-                  if(entry.rotation) page.setRotation(PDFLib.degrees(entry.rotation % 360));
-                  return;
-                }
-                return outDoc.copyPages(bySrc[entry.srcIdx], [entry.pageIdx]).then(function(copied){
-                  var cp = copied[0];
-                  if(entry.rotation){
-                    var base = cp.getRotation().angle || 0;
-                    cp.setRotation(PDFLib.degrees((base + entry.rotation) % 360));
-                  }
-                  outDoc.addPage(cp);
-                });
-              });
-            });
-            return chain.then(function(){ return outDoc.save(); });
-          });
-        });
-      });
+  // Branch Export's PDF output: any IMAGE-kind entry (a photographed
+  // letter, not a real PDF page) is first run through the autocrop +
+  // clarity pass -- cropping the desk/background margin and sharpening
+  // contrast -- and the CLEANED result is what gets embedded, instead of a
+  // raw, unedited copy of whatever the camera originally captured.
+  function cleanedEmbedImage(outDoc, si){
+    return cleanedPhotoCanvas(si, 0).then(function(canvas){
+      if(!canvas) return rawEmbedImage(outDoc, si); // cleanup failed -- embed the original rather than drop the page
+      return canvasToJpegBlob(canvas, 0.95).then(function(blob){ return blob.arrayBuffer(); })
+        .then(function(buf){ return outDoc.embedJpg(new Uint8Array(buf)); });
+    });
+  }
+  function buildBranchPdfBytes(entries, docCache){
+    return buildPdfFromEntriesCore(entries, cleanedEmbedImage, docCache);
   }
 
   function anchorDownload(blob, filename){
@@ -1376,7 +1354,13 @@
   el.branchExportOverlay.addEventListener('click', function(e){ if(e.target === el.branchExportOverlay) closeBranchExportModal(); });
 
   el.beFolderBtn.addEventListener('click', function(){
-    (window.showDirectoryPicker ? window.showDirectoryPicker() : Promise.reject())
+    // {mode:'readwrite'} is required here -- without it the handle is
+    // granted read-only access, and writeOutputFile()'s later
+    // getFileHandle(...).createWritable() call (which needs readwrite)
+    // would have to request a permission upgrade with no active user
+    // gesture left by the time a possibly multi-second OCR detection pass
+    // finishes, and could be silently denied.
+    (window.showDirectoryPicker ? window.showDirectoryPicker({mode: 'readwrite'}) : Promise.reject())
       .then(function(handle){
         beDirHandle = handle;
         el.beFolderLabel.textContent = 'Saving to: ' + handle.name;
@@ -1447,7 +1431,13 @@
     }
 
     detectNext().then(function(){
-      return worker ? worker.terminate().catch(function(){}) : null;
+      // Reset the shared promise too, not just the local `worker` var --
+      // otherwise the NEXT Branch Export run's getOcrWorker() would hand
+      // back this same now-terminated worker (ocrWorkerPromise still
+      // resolved from this run) and every OCR call in that run would
+      // reject immediately.
+      if(worker){ ocrWorkerPromise = null; return worker.terminate().catch(function(){}); }
+      return null;
     }).then(function(){
       if(beCancelRequested){
         beSetStatus('Cancelled after detecting ' + detections.length + ' of ' + pages.length + ' page(s).');
@@ -1470,12 +1460,18 @@
       var writeChain = Promise.resolve();
 
       if(format === 'pdf'){
+        // Shared across every branch's buildBranchPdfBytes() call below --
+        // a single multi-page source PDF commonly supplies pages to many
+        // different branches, and without this cache each branch's output
+        // would re-parse that same source PDF from scratch via
+        // PDFLib.PDFDocument.load() all over again.
+        var pdfLibDocCache = {};
         order.forEach(function(branchName, g){
           writeChain = writeChain.then(function(){
             if(beCancelRequested) return;
             beSetProgress(0.7 + (g / order.length) * 0.3);
             var branchEntries = groups[branchName];
-            return buildBranchPdfBytes(branchEntries).then(function(bytes){
+            return buildBranchPdfBytes(branchEntries, pdfLibDocCache).then(function(bytes){
               var fname = sanitizeFilePart(branchName) + '.pdf';
               return writeOutputFile(fname, bytes, zip).then(function(){
                 filesWritten++;
