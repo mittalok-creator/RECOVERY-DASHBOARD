@@ -225,6 +225,7 @@
       <button type="button" class="tbtn" id="btnMerge" disabled title="Append/replace with another PDF or image">🔗 Merge PDFs</button>
       <button type="button" class="tbtn" id="btnImagesToPdf" title="Import one or more images and build a PDF from them">🖼️ Images → PDF</button>
       <button type="button" class="tbtn" id="btnBranchExport" disabled title="Detect each page's branch name and export branch-wise PDFs or JPGs">🏷️ Branch Export</button>
+      <button type="button" class="tbtn" id="btnPagesToImages" disabled title="Save every page as its own high-quality JPG — no branch detection">🖼️ Pages → JPG</button>
     </div>
     <div class="tbgroup">
       <button type="button" class="tbtn" id="btnRotL" disabled>↶ Rotate</button>
@@ -328,6 +329,40 @@
     </div>
   </div>
 </div>
+<div class="modal-overlay" id="pagesToImagesOverlay" style="display:none">
+  <div class="modal-sheet wide">
+    <button type="button" class="modal-close" id="p2iClose">Close</button>
+    <h3>Pages → JPG Images</h3>
+    <p class="be-hint">Saves every page currently in the strip above as its own high-quality JPG, all in one folder — no branch names, no detection, just a straight PDF-to-images conversion.</p>
+
+    <div class="be-field">
+      <label>Pages to export</label>
+      <div class="be-radio-row">
+        <label><input type="radio" name="p2iScope" id="p2iScopeAll" value="all" checked> All pages (<span id="p2iAllCount">0</span>)</label>
+        <label><input type="radio" name="p2iScope" id="p2iScopeSel" value="selected"> Selected only (<span id="p2iSelCount">0</span>)</label>
+      </div>
+    </div>
+
+    <div class="be-field">
+      <label>Save to</label>
+      <div class="be-folder-row">
+        <button type="button" class="btn-ghost" id="p2iFolderBtn">Choose desired folder…</button>
+        <span class="be-hint" id="p2iFolderLabel" style="margin:0">No folder chosen — a ZIP will be downloaded instead.</span>
+      </div>
+    </div>
+
+    <div class="be-actions">
+      <button type="button" class="tbtn primary" id="p2iRun">Start</button>
+      <button type="button" class="tbtn" id="p2iCancel" disabled>Cancel</button>
+    </div>
+
+    <div class="be-progress-wrap" id="p2iProgressWrap" style="display:none">
+      <div class="be-progress-track"><div class="be-progress-fill" id="p2iProgressFill"></div></div>
+      <div class="be-status" id="p2iStatus"></div>
+      <div class="be-log" id="p2iLog"></div>
+    </div>
+  </div>
+</div>
 
 <script>
 (function(){
@@ -354,7 +389,9 @@
    'statusText','searchInput','btnFind','btnSelectAll','grid','previewTitle','zoomRange',
    'zoomMinus','zoomPlus','zoomFit','previewStage','btnDiag','toast','diagOverlay',
    'btnBranchExport','branchExportOverlay','beClose','beBranchList','beFormatPdf','beFormatJpg',
-   'beFolderBtn','beFolderLabel','beRun','beCancel','beProgressWrap','beProgressFill','beStatus','beLog'
+   'beFolderBtn','beFolderLabel','beRun','beCancel','beProgressWrap','beProgressFill','beStatus','beLog',
+   'btnPagesToImages','pagesToImagesOverlay','p2iClose','p2iScopeAll','p2iScopeSel','p2iAllCount','p2iSelCount',
+   'p2iFolderBtn','p2iFolderLabel','p2iRun','p2iCancel','p2iProgressWrap','p2iProgressFill','p2iStatus','p2iLog'
   ].forEach(function(id){ el[id] = document.getElementById(id); });
 
   function toast(msg){
@@ -754,7 +791,7 @@
       : (pages.length ? 'Click a page to select it.' : 'Open a PDF to begin.');
 
     var hasPages = pages.length > 0;
-    [el.btnExtract, el.btnSave, el.btnShare, el.btnClear, el.btnSelectAll, el.btnDiag, el.btnAdd, el.btnMerge, el.btnBranchExport]
+    [el.btnExtract, el.btnSave, el.btnShare, el.btnClear, el.btnSelectAll, el.btnDiag, el.btnAdd, el.btnMerge, el.btnBranchExport, el.btnPagesToImages]
       .forEach(function(b){ b.disabled = !hasPages; });
     var hasSel = selected.size > 0;
     [el.btnRotL, el.btnRotR, el.btnDup, el.btnRemove, el.btnReverse].forEach(function(b){ b.disabled = !hasSel && b !== el.btnReverse; });
@@ -1368,9 +1405,12 @@
       .catch(function(){ /* user cancelled the picker -- leave prior selection, if any */ });
   });
 
-  function writeOutputFile(filename, bytesOrBlob, zip){
-    if(beFsaSupported && beDirHandle){
-      return beDirHandle.getFileHandle(filename, {create: true}).then(function(fh){
+  // dirHandle generalized out (was hardcoded to beDirHandle) so Pages->JPG
+  // below can reuse this exact write-to-folder-or-zip logic with its own,
+  // independently-chosen folder handle rather than duplicating it.
+  function writeOutputFile(filename, bytesOrBlob, zip, dirHandle){
+    if(dirHandle){
+      return dirHandle.getFileHandle(filename, {create: true}).then(function(fh){
         return fh.createWritable().then(function(w){
           return w.write(bytesOrBlob).then(function(){ return w.close(); });
         });
@@ -1487,7 +1527,7 @@
             var branchEntries = groups[branchName];
             return buildBranchPdfBytes(branchEntries, pdfLibDocCache).then(function(bytes){
               var fname = sanitizeFilePart(branchName) + '.pdf';
-              return writeOutputFile(fname, bytes, zip).then(function(){
+              return writeOutputFile(fname, bytes, zip, beDirHandle).then(function(){
                 filesWritten++;
                 beLogLine('Wrote ' + fname + ' (' + branchEntries.length + ' page(s))');
               });
@@ -1505,7 +1545,7 @@
                 if(!canvas) return;
                 return canvasToJpegBlob(canvas, 0.95).then(function(blob){
                   var jname = sanitizeFilePart(branchName) + '_' + (k + 1) + '.jpg';
-                  return writeOutputFile(jname, blob, zip).then(function(){
+                  return writeOutputFile(jname, blob, zip, beDirHandle).then(function(){
                     filesWritten++;
                     beLogLine('Wrote ' + jname);
                   });
@@ -1543,6 +1583,117 @@
   }
   el.beRun.addEventListener('click', runBranchExport);
   el.beCancel.addEventListener('click', function(){ beCancelRequested = true; });
+
+  // ---------- Pages -> JPG (plain PDF-to-images, no branch detection) ----------
+  // Alok's follow-up (2026-10-17): Branch Export's JPG output always needs a
+  // branch list typed in first (leaving it blank just shows "enter a branch
+  // name" and does nothing) -- there was no direct "just turn every page
+  // into a JPG" path. This is that path: same HD render/autocrop/enhance
+  // pipeline (getExportCanvas/canvasToJpegBlob) and the same folder-or-ZIP
+  // save (writeOutputFile, now shared with Branch Export above) minus the
+  // OCR/detection pass entirely, so it's instant even for a large PDF.
+  var piFsaSupported = 'showDirectoryPicker' in window;
+  var piDirHandle = null;
+  var piCancelRequested = false;
+  var piRunning = false;
+
+  if(!piFsaSupported){
+    el.p2iFolderBtn.hidden = true;
+    el.p2iFolderLabel.textContent = 'Your browser will bundle every image into one ZIP to download.';
+  }
+
+  function openPagesToImagesModal(){
+    if(!pages.length) return;
+    el.p2iAllCount.textContent = pages.length;
+    el.p2iSelCount.textContent = selected.size;
+    el.p2iScopeSel.disabled = !selected.size;
+    if(!selected.size){ el.p2iScopeAll.checked = true; }
+    el.p2iProgressWrap.style.display = 'none';
+    el.p2iLog.textContent = '';
+    el.p2iStatus.textContent = '';
+    el.pagesToImagesOverlay.style.display = 'flex';
+  }
+  function closePagesToImagesModal(){
+    if(piRunning) return; // don't let Close abandon a mid-run export silently
+    el.pagesToImagesOverlay.style.display = 'none';
+  }
+  el.btnPagesToImages.addEventListener('click', openPagesToImagesModal);
+  el.p2iClose.addEventListener('click', closePagesToImagesModal);
+  el.pagesToImagesOverlay.addEventListener('click', function(e){ if(e.target === el.pagesToImagesOverlay) closePagesToImagesModal(); });
+
+  el.p2iFolderBtn.addEventListener('click', function(){
+    (window.showDirectoryPicker ? window.showDirectoryPicker({mode: 'readwrite'}) : Promise.reject())
+      .then(function(handle){
+        piDirHandle = handle;
+        el.p2iFolderLabel.textContent = 'Saving to: ' + handle.name;
+      })
+      .catch(function(){ /* user cancelled the picker -- leave prior selection, if any */ });
+  });
+
+  function runPagesToImages(){
+    if(piRunning) return;
+    var scope = el.p2iScopeSel.checked ? 'selected' : 'all';
+    var idxs = scope === 'selected'
+      ? Array.from(selected).sort(function(a,b){ return a-b; })
+      : pages.map(function(_,i){ return i; });
+    if(!idxs.length){ el.p2iStatus.textContent = 'No pages to export.'; return; }
+
+    piRunning = true; piCancelRequested = false;
+    el.p2iRun.disabled = true; el.p2iCancel.disabled = false;
+    el.p2iProgressWrap.style.display = 'block';
+    el.p2iLog.textContent = '';
+    el.p2iProgressFill.style.width = '0%';
+
+    var zip = (piFsaSupported && piDirHandle) ? null : new JSZip();
+    var padLen = Math.max(2, String(idxs.length).length);
+    var filesWritten = 0;
+    var writeChain = Promise.resolve();
+
+    idxs.forEach(function(pageIdx, k){
+      writeChain = writeChain.then(function(){
+        if(piCancelRequested) return;
+        el.p2iStatus.textContent = 'Rendering page ' + (k + 1) + ' of ' + idxs.length + '…';
+        el.p2iProgressFill.style.width = Math.round((k / idxs.length) * 100) + '%';
+        var entry = pages[pageIdx];
+        return getExportCanvas(entry.srcIdx, entry.pageIdx, entry.rotation).then(function(canvas){
+          if(!canvas) return;
+          return canvasToJpegBlob(canvas, 0.95).then(function(blob){
+            var num = String(k + 1);
+            while(num.length < padLen) num = '0' + num;
+            var fname = 'Page_' + num + '.jpg';
+            return writeOutputFile(fname, blob, zip, piDirHandle).then(function(){
+              filesWritten++;
+              el.p2iLog.textContent += 'Wrote ' + fname + '\n';
+              el.p2iLog.scrollTop = el.p2iLog.scrollHeight;
+            });
+          });
+        });
+      });
+    });
+
+    writeChain.then(function(){
+      el.p2iProgressFill.style.width = '100%';
+      if(zip && !piCancelRequested && filesWritten > 0){
+        el.p2iStatus.textContent = 'Building ZIP…';
+        return zip.generateAsync({type: 'blob'}).then(function(zipBlob){
+          anchorDownload(zipBlob, 'Pages_as_Images_' + dateStamp() + '.zip');
+        });
+      }
+    }).then(function(){
+      el.p2iRun.disabled = false; el.p2iCancel.disabled = true; piRunning = false;
+      if(piCancelRequested){
+        el.p2iStatus.textContent = 'Cancelled. ' + filesWritten + ' image(s) written before stopping.';
+      } else {
+        el.p2iStatus.textContent = 'Done. ' + filesWritten + ' image(s) saved.';
+        toast('Pages exported as images');
+      }
+    }).catch(function(err){
+      el.p2iRun.disabled = false; el.p2iCancel.disabled = true; piRunning = false;
+      el.p2iStatus.textContent = 'Export failed: ' + (err && err.message || err);
+    });
+  }
+  el.p2iRun.addEventListener('click', runPagesToImages);
+  el.p2iCancel.addEventListener('click', function(){ piCancelRequested = true; });
 
   // ---------- keyboard shortcuts (same set as the original desktop app) ----------
   document.addEventListener('keydown', function(e){
