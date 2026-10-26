@@ -985,19 +985,29 @@
   // WhatsApp Web deep link explaining the file was downloaded.
   function shareFileOrFallback(blob, fileName, mimeType, shareText){
     var file = new File([blob], fileName, {type:mimeType});
+    function fallbackDownload(){
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 30000);
+      var msg = shareText + ' — PDF downloaded to your computer. If WhatsApp shows "used in another tab", tap Use Here, then attach the PDF from your Downloads.';
+      window.open('https://wa.me/?text=' + encodeURIComponent(msg), 'pdfPageManagerWhatsAppShare');
+    }
     if(navigator.canShare && navigator.canShare({files:[file]})){
       return navigator.share({ files:[file], title:'PDF Page Manager', text:shareText }).catch(function(err){
         if(err && err.name === 'AbortError') return;
-        throw err;
+        // Any other failure (e.g. no registered share target for this file
+        // type on this device -- canShare({files}) only checks API-level
+        // capability, not whether anything will actually accept it) falls
+        // through to the manual download+wa.me path instead of leaving the
+        // user with neither a shared file nor a downloaded one -- same fix
+        // as the main app's own copy of this function (js/app.js).
+        console.error('navigator.share failed, falling back to download:', err);
+        fallbackDownload();
       });
     }
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url; a.download = fileName;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(function(){ URL.revokeObjectURL(url); }, 30000);
-    var msg = shareText + ' — PDF downloaded to your computer. If WhatsApp shows "used in another tab", tap Use Here, then attach the PDF from your Downloads.';
-    window.open('https://wa.me/?text=' + encodeURIComponent(msg), 'pdfPageManagerWhatsAppShare');
+    fallbackDownload();
     return Promise.resolve();
   }
 

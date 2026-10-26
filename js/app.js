@@ -349,11 +349,17 @@ async function shareFileOrFallback(blob, fileName, mimeType, shareText){
   if(navigator.canShare && navigator.canShare({files:[file]})){
     try{
       await navigator.share({ files:[file], title:'UPGB Recovery Dashboard', text:shareText });
+      return;
     }catch(err){
       if(err && err.name==='AbortError') return; // user closed the share sheet -- not a failure
-      throw err;
+      // Any other failure falls through to the manual download+wa.me path
+      // below, instead of leaving the user with neither a shared file nor
+      // a downloaded one -- same fix as NPA-DASHBOARD's own copy of this
+      // function, 2026-10-26: canShare({files}) only checks API-level
+      // capability, not whether anything will actually accept the file,
+      // so it can answer true with no real share target registered.
+      console.error('navigator.share failed, falling back to download:', err);
     }
-    return;
   }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
