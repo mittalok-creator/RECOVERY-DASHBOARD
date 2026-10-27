@@ -6183,6 +6183,81 @@ const PNPA_DL_EXPORTS = [
   {id:'pnpamonthly', title:'Monthly PNPA', desc:"This month's slippage, as uploaded (already period-scoped by Head Office).", fn:'dlExportPnpaMonthly', icon:DL_ICON_CAL_RANGE, color:'teal'},
 ];
 
+/* ---------- Download tab: SMA exports -- a fourth DL_TAB_GROUPS category,
+   mirrors NPA-DASHBOARD's own copy of this section byte-for-byte except
+   dlSmaSourceRows() below, which is branch-locked the same way
+   dlKccSourceRows()/dlPnpaSourceRows() above and smaFilteredRows() (the
+   on-screen SMA Dashboard's own filter) already are -- straight off
+   r[SR.SOL_ID] since that column already holds the exact Sol ID per row,
+   no branch-name lookup map needed the way KCC's own lock requires. ---------- */
+const SMA_DL_OUT_HEADERS = ['Sol ID','Branch','Account No','Customer ID','Scheme Code','Account Name',
+  'Outstanding','SMA (Customer)','SMA (Account)','SMA Reason','SMA Type','Non-Financial',
+  'Limit Review Date','Limit','ROI','CADU','Sanction Date','Mobile No'];
+const SMA_DL_OUT_WIDTHS = [10,18,16,14,12,30,16,14,13,30,12,13,16,13,8,13,13,14];
+function dlWriteSmaSheet(ws, rows){
+  const hRow = ws.getRow(1);
+  SMA_DL_OUT_HEADERS.forEach((h,i)=>{ hRow.getCell(i+1).value = h; });
+  dlStyleHeaderRow(hRow, SMA_DL_OUT_HEADERS.length);
+  rows.forEach((r, ri)=>{
+    const row = ws.getRow(ri+2);
+    row.getCell(1).value = r[SR.SOL_ID]; row.getCell(2).value = r[SR.BRANCH];
+    setIdCell(row.getCell(3), r[SR.ACCT]); setIdCell(row.getCell(4), r[SR.CUST_ID]);
+    row.getCell(5).value = r[SR.SCHEME]; row.getCell(6).value = r[SR.NAME];
+    row.getCell(7).value = Number(r[SR.OS])||0; row.getCell(7).numFmt = '0.00';
+    row.getCell(8).value = r[SR.SMACUST]; row.getCell(9).value = r[SR.SMAACC];
+    row.getCell(10).value = r[SR.SMAREASON]; row.getCell(11).value = r[SR.SMA_TYPE];
+    row.getCell(12).value = r[SR.NON_FINANCIAL] ? 'Y' : 'N';
+    row.getCell(13).value = r[SR.LIMREVIEW_DATE];
+    row.getCell(14).value = Number(r[SR.LIMIT])||0; row.getCell(14).numFmt = '0.00';
+    row.getCell(15).value = Number(r[SR.ROI])||0; row.getCell(15).numFmt = '0.00';
+    row.getCell(16).value = Number(r[SR.CADU])||0; row.getCell(16).numFmt = '0.00';
+    row.getCell(17).value = r[SR.SANCT_DT]; row.getCell(18).value = r[SR.MOB];
+    if(ri % 2 === 1){
+      for(let fc=1; fc<=SMA_DL_OUT_HEADERS.length; fc++){ row.getCell(fc).fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F5F3'}}; }
+    }
+  });
+  ws.columns.forEach((col,i)=>{ col.width = SMA_DL_OUT_WIDTHS[i]; });
+  if(rows.length){ ws.autoFilter = { from:{row:1,column:1}, to:{row:rows.length+1,column:SMA_DL_OUT_HEADERS.length} }; }
+}
+// Lazily fetches data/sma.json the same way renderSmaDashboard() already
+// does, reusing whatever's already loaded if the SMA Dashboard tab was
+// visited earlier this session.
+function ensureSmaDataForDl(){
+  if(SMA_DATA) return Promise.resolve(SMA_DATA);
+  return fetchJson(DATA_ORIGIN + 'data/sma.json?t=' + Date.now())
+    .then(d => { SMA_DATA = d; return d; })
+    .catch(e => { showToast('Could not load SMA data.'); throw e; });
+}
+function dlSmaSourceRows(){
+  const rows = (SMA_DATA && SMA_DATA.rows) || [];
+  const solId = loggedInSolId();
+  if(!solId) return rows;
+  return rows.filter(r => String(r[SR.SOL_ID]) === String(solId));
+}
+function dlExportSmaTotal(){
+  ensureSmaDataForDl().then(()=>{
+    dlExportWorkbook([{name:'SMA_Total', rows: dlSmaSourceRows()}], 'SMA_Total_' + dateToInputValue(new Date()) + '.xlsx', dlWriteSmaSheet);
+  }).catch(()=>{});
+}
+function dlExportSmaStage(stageKey){
+  ensureSmaDataForDl().then(()=>{
+    const stage = SMA_STAGES.find(s=>s.key===stageKey);
+    const sheetName = stage ? stage.label : 'SMA'; // 'SMA-0' etc -- valid Excel sheet name as-is
+    const fileTag = stage ? stage.label.replace('SMA-', 'SMA_') : 'SMA'; // 'SMA_0' etc -- avoids a doubled "SMA_SMA_0" filename
+    const rows = stage ? dlSmaSourceRows().filter(r=>r[SR.SMACUST]===stage.match) : [];
+    dlExportWorkbook([{name:sheetName, rows}], fileTag + '_' + dateToInputValue(new Date()) + '.xlsx', dlWriteSmaSheet);
+  }).catch(()=>{});
+}
+function dlExportSma0(){ dlExportSmaStage('sma0'); }
+function dlExportSma1(){ dlExportSmaStage('sma1'); }
+function dlExportSma2(){ dlExportSmaStage('sma2'); }
+const SMA_DL_EXPORTS = [
+  {id:'smatotal', title:'Total SMA List', desc:'Every SMA-flagged account, one sheet.', fn:'dlExportSmaTotal', icon:DL_ICON_WALLET, color:'indigo'},
+  {id:'sma0', title:'SMA-0', desc:'Accounts currently flagged SMA-0.', fn:'dlExportSma0', icon:DL_ICON_CLOCK, color:'jade'},
+  {id:'sma1', title:'SMA-1', desc:'Accounts currently flagged SMA-1.', fn:'dlExportSma1', icon:DL_ICON_CLOCK, color:'gold'},
+  {id:'sma2', title:'SMA-2', desc:'Accounts currently flagged SMA-2.', fn:'dlExportSma2', icon:DL_ICON_CLOCK, color:'coral'},
+];
+
 const DL_EXPORTS = [
   {id:'complete', title:'Complete NPA List', desc:'Every account in the current NPA book, one sheet.', fn:'dlExportComplete', icon:DL_ICON_LIST, color:'jade'},
   {id:'assetcode', title:'Asset Code wise NPA List', desc:'Pick all 5 categories in one workbook, or any single category on its own.', fn:'dlExportAssetCodeWise', icon:DL_ICON_LAYERS, color:'gold'},
@@ -6199,10 +6274,11 @@ const DL_TAB_GROUPS = [
   {id:'npa', label:'NPA', exports: DL_EXPORTS},
   {id:'kccoverdue', label:'KCC Overdue', exports: KCC_DL_EXPORTS},
   {id:'pnpa', label:'PNPA', exports: PNPA_DL_EXPORTS},
+  {id:'sma', label:'SMA', exports: SMA_DL_EXPORTS},
 ];
 // Icons for the tab row itself (separate from each card's own icon above),
 // keyed by DL_TAB_GROUPS id.
-const DL_TAB_ICONS = { npa: DL_ICON_LIST, kccoverdue: DL_ICON_CLOCK, pnpa: DL_ICON_CAL_DAY };
+const DL_TAB_ICONS = { npa: DL_ICON_LIST, kccoverdue: DL_ICON_CLOCK, pnpa: DL_ICON_CAL_DAY, sma: DL_ICON_WALLET };
 let dlActiveTab = DL_TAB_GROUPS[0].id;
 const DL_DOWNLOAD_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
 function setDlTab(id){ dlActiveTab = id; renderNpaDownloadView(); }
@@ -10137,6 +10213,10 @@ window.dlExportKccTotal = dlExportKccTotal;
 window.dlExportPnpaDaily = dlExportPnpaDaily;
 window.dlExportPnpaWeekly = dlExportPnpaWeekly;
 window.dlExportPnpaMonthly = dlExportPnpaMonthly;
+window.dlExportSmaTotal = dlExportSmaTotal;
+window.dlExportSma0 = dlExportSma0;
+window.dlExportSma1 = dlExportSma1;
+window.dlExportSma2 = dlExportSma2;
 window.setDlTab = setDlTab;
 
 /* ---------- Nav / view switching ---------- */
